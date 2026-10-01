@@ -74,10 +74,13 @@ browser. It is served on `127.0.0.1`, so only this machine can view it
 (a running app picks the changes up immediately); when you are done, just close
 the tab — the page stays available for the whole time the app runs.
 
-- **Trigger key** — pick from the dropdown (F1–F12, Ctrl, Alt, Shift, letter/digit),
+- **Trigger key** — pick from the dropdown (F1–F12, Ctrl, Alt, Shift, Win, letter/digit),
   or press **Detect my key** and then physically hold the shortcut you want:
   the key is detected and loaded into the dropdown. Prefer F-keys: holding a
   letter or digit key also types repeated characters into your document.
+  You can also choose a **combination** (e.g. `Ctrl + F9` or `Win + Ctrl`): the
+  listener starts recording only when *all* parts are physically held at once,
+  and stops when any is released.
 - **Engine** — model options shown change automatically to match the engine you
   select:
   - `OpenAI Whisper (faster-whisper)` — fast on CPU; shows a model-size dropdown:
@@ -97,6 +100,14 @@ the tab — the page stays available for the whole time the app runs.
   "Remove" deletes a row.
 - **Test microphone** — records 4 s and shows what was recognized (useful for
   debugging mic/engine setup).
+- **Live status** — the settings page also shows, in real time, where the hold-to-talk
+  pipeline currently is (idle / recording / transcribing / "nothing recognized" /
+  "too short"). If a cycle produces no text, look at this line to see where it stopped.
+
+A separate **Models** page lives at `http://127.0.0.1:47111/models.html`: it lists every
+model (Whisper sizes, Canary, Parakeet presets) plus anything else physically present in
+the HF cache, with installed/present status and size, and lets you **Download** (pre-fetch
+a model, needs internet once) or **Delete** it. Models already present are used offline.
 
 Models are downloaded once from Hugging Face/CT2 on first use and cached
 (`~/.cache`). After that, inference is fully offline.

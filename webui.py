@@ -1,13 +1,19 @@
-"""Settings UI served as a web page on 127.0.0.1 only (stdlib http.server).
+"""Settings + model-manager UI served as a web page on 127.0.0.1 only (stdlib http.server).
 
-A random high port plus the 127.0.0.1 address means no other machine on your
-network can open it, so no password is needed. The settings are still saved
-to config.json, and a save is pushed into the running app immediately."""
+The 127.0.0.1 address means no other machine on your network can open it, so no
+password is needed. Settings are still saved to config.json, and a save is pushed
+into the running app immediately. The same server also hosts a "Models" page that
+lists every model and can download or delete them from the local HF cache.
+
+Single source of truth: KEY_VK (virtual key codes) and the model/engine tables are
+defined here and imported by app.py, so the UI and the hotkey loop never drift.
+"""
 
 import ctypes
 import json
 import os
 import random
+import shutil
 import threading
 import time
 
@@ -19,24 +25,72 @@ import config as config_mod
 import recorder
 import asr
 
-# Virtual key codes for polling key state (single source of truth; app.py imports this).
+# ---------------------------------------------------------------------------
+# Key codes (shared with app.py)
+# ---------------------------------------------------------------------------
+
 KEY_VK = {f"f{i}": 0x70 + i - 1 for i in range(1, 13)}
 KEY_VK.update({"ctrl": 0x11, "alt": 0x12, "shift": 0x10})
+KEY_VK.update({"win": 0xA0, "lwin": 0xA0, "rwin": 0xA1})
 for _c in range(ord("a"), ord("z") + 1):
     KEY_VK[chr(_c)] = _c - 32
 for _d in range(10):
     KEY_VK[str(_d)] = ord(str(_d))
 
-TRIGGER_KEYS = [f"f{i}" for i in range(1, 13)] + ["ctrl", "alt", "shift"]
-TRIGGER_KEYS += [chr(c) for c in range(ord("a"), ord("z") + 1)]
-TRIGGER_KEYS += [str(d) for d in range(10)]
+_MODS = ["ctrl", "alt", "shift", "win"]
+
+SINGLE_KEYS = [f"f{i}" for i in range(1, 13)] + _MODS
+SINGLE_KEYS += [chr(c) for c in range(ord("a"), ord("z") + 1)]
+SINGLE_KEYS += [str(d) for d in range(10)]
+
+# Combination triggers: modifier pairs and modifier+F-key. The listener keys off
+# the whole combination - every part must be physically held at once.
+COMBOS = []
+for _a in range(len(_MODS)):
+    for _b in range(_a + 1, len(_MODS)):
+        COMBOS.append(_MODS[_a] + "+" + _MODS[_b])
+for _m in _MODS:
+    for _i in range(1, 13):
+        COMBOS.append(_m + "+f" + str(_i))
+
+TRIGGER_KEYS = SINGLE_KEYS + COMBOS
 
 
 def _key_label(name):
+    if "+" in name:
+        return " + ".join(_key_label(p) for p in name.split("+"))
     if name in ("ctrl", "alt", "shift"):
         return name.capitalize()
+    if name in ("win", "lwin", "rwin"):
+        return "Win"
     return name.upper()
 
+
+def _key_held(name):
+    for part in name.split("+"):
+        part = part.strip()
+        if not (ctypes.windll.user32.GetKeyState(KEY_VK.get(part, 0)) & 0x8000):
+            return False
+    return True
+
+
+def detect_key(timeout):
+    """Poll every candidate (single keys and combinations) until one is held
+    physically twice in a row. Combos win over single keys first."""
+    start = time.time()
+    while time.time() - start < timeout:
+        for name in COMBOS + SINGLE_KEYS:
+            if _key_held(name):
+                time.sleep(0.1)
+                if _key_held(name):
+                    return name
+        time.sleep(0.02)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Model / engine tables (shared with app.py for validation + model manager)
+# ---------------------------------------------------------------------------
 
 ENGINE_ORDER = ["whisper", "canary", "parakeet", "custom"]
 ENGINE_LABELS = {
@@ -92,258 +146,28 @@ OUTPUT_MODES = [
 ]
 
 
-def detect_key(timeout):
-    """Poll every candidate key until one is physically held (twice in a row)."""
-    start = time.time()
-    while time.time() - start < timeout:
-        for name in TRIGGER_KEYS:
-            vk = KEY_VK[name]
-            if ctypes.windll.user32.GetKeyState(vk) & 0x8000:
-                time.sleep(0.1)
-                if ctypes.windll.user32.GetKeyState(vk) & 0x8000:
-                    return name
-        time.sleep(0.02)
-    return None
+def _repo_for(engine, value):
+    """Map a selection to the Hugging Face repo id used to download it."""
+    if engine == "whisper":
+        return "Systran/faster-whisper-" + str(value)
+    return str(value)
 
 
-def _page_data():
-    return {
-        "keys": [[k, _key_label(k)] for k in TRIGGER_KEYS],
-        "engines": [[e, ENGINE_LABELS[e]] for e in ENGINE_ORDER],
-        "whisper_sizes": [[s, WHISPER_SIZE_LABELS[s]] for s in WHISPER_SIZES],
-        "canary": [[m, label] for m, label in CANARY_MODELS],
-        "parakeet": [[m, label] for m, label in PARAKEET_MODELS],
-        "languages": [[c, label] for c, label in LANGUAGES],
-        "outputs": [[m, label] for m, label in OUTPUT_MODES],
-    }
+def _hf_cache_dir():
+    for env in ("HF_HUB_CACHE",):
+        p = os.environ.get(env)
+        if p:
+            return p
+    home = os.environ.get("HF_HOME")
+    if home:
+        return os.path.join(home, "hub")
+    return os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub")
 
 
-PAGE = r"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Voice Dictation settings</title>
-<style>
-body{font-family:"Segoe UI",system-ui,sans-serif;background:#f6f7f8;color:#20242a;
-     max-width:820px;margin:14px auto;padding:10px 16px;}
-h1{font-size:1.3rem;}
-.note{font-size:.85rem;color:#4a525c;}
-#msg{position:sticky;top:10px;background:#17324f;color:#eef3f8;padding:9px 12px;
-     border-radius:6px;font-weight:600;}
-.row{display:flex;align-items:center;gap:8px;margin:8px 0;}
-.lbl{font-weight:600;min-width:180px;}
-select,textarea{font:inherit;}
-select{min-width:120px;}
-.ce{border:1px solid #8a94a0;border-radius:4px;padding:3px 8px;background:#fff;min-width:110px;}
-textarea.ce{min-width:220px;white-space:pre-wrap;}
-.cmdrow{display:flex;align-items:center;gap:8px;margin:8px 0;}
-.btns{margin-top:22px;text-align:center;}
-.btns button{margin:0 10px;}
-</style>
-</head>
-<body>
-<script>window.__INIT__ = __INIT_JSON__;</script>
-<h1>Voice Dictation settings</h1>
-<div class="note">This page is served only to this machine (127.0.0.1) - nobody
-on your network can open it, so no password is needed. Settings are saved to
-<code>config.json</code> in the app folder; the running app uses them right away.</div>
-<div id="msg">Ready. Edit anything below, then press "Save settings" - the running
-app uses them right away. Close this tab whenever you are done; the page stays
-available while the app runs.</div>
-<form id="f"></form>
-<div class="btns">
-<button id="btn-detect">Detect my key</button>
-<button id="btn-save">Save settings</button>
-<button id="btn-test">Test microphone (4 s)</button>
-</div>
-<div class="note">"Detect my key": click the button, then physically hold the shortcut you
-want for a moment - it is captured automatically. Prefer F-keys / Ctrl / Alt / Shift:
-holding a letter or digit also types repeated characters in your document.</div>
-<script>
-var D = window.__INIT__.data;
-var st = window.__INIT__.cfg;
-st.language = typeof st.language === 'string' ? st.language : '';
-st.cmds = (st.commands || []).map(function (o) {
-  return { say: o.say || '', insert: o.insert || '' };
-});
-var f = document.getElementById('f');
-var msgEl = document.getElementById('msg');
-
-function setMsg(t) { msgEl.textContent = t; }
-
-function post(path, obj, fn) {
-  fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(obj)})
-    .then(function (r) { return r.json(); })
-    .then(fn)
-    .catch(function (e) {
-      setMsg('Could not reach the settings server (' + e +
-        '). The app must be running - start it again, then press Open settings.');
-    });
-}
-
-function keyLabel(k) {
-  if (k === 'ctrl') return 'Ctrl';
-  if (k === 'alt') return 'Alt';
-  if (k === 'shift') return 'Shift';
-  return k.toUpperCase();
-}
-
-var selKey = null, customEl = null, modelBlock = null;
-var cmdRows = [];
-
-function selectField(parent, name, field, opts, onChange) {
-  var row = document.createElement('div'); row.className = 'row';
-  var lab = document.createElement('span'); lab.className = 'lbl';
-  lab.textContent = name;
-  var sel = document.createElement('select');
-  sel.onchange = function () {
-    st[field] = sel.value;
-    if (onChange) onChange();
-  };
-  for (var i = 0; i < opts.length; i++) {
-    var o = document.createElement('option');
-    o.setAttribute('value', opts[i][0]);
-    o.textContent = opts[i][1];
-    var cur = (st[field] === null || st[field] === undefined) ? '' : st[field];
-    if (opts[i][0] === cur) o.selected = true;
-    sel.appendChild(o);
-  }
-  row.appendChild(lab); row.appendChild(sel); parent.appendChild(row);
-  return sel;
-}
-
-function fillModel() {
-  while (modelBlock.firstChild) modelBlock.removeChild(modelBlock.firstChild);
-  customEl = null;
-  if (st.engine === 'whisper') {
-    selectField(modelBlock, 'Whisper model size:', 'whisper_model',
-      D.whisper_sizes, null);
-  } else if (st.engine === 'canary') {
-    selectField(modelBlock, 'Canary preset:', 'hf_model',
-      D.canary, null);
-  } else if (st.engine === 'parakeet') {
-    selectField(modelBlock, 'Parakeet preset:', 'hf_model',
-      D.parakeet, null);
-  } else {
-    var row = document.createElement('div'); row.className = 'row';
-    var lab = document.createElement('span'); lab.className = 'lbl';
-    lab.textContent = 'Custom model ID:';
-    var ta = document.createElement('textarea');
-    ta.rows = 1; ta.className = 'ce';
-    ta.value = st.hf_model || '';
-    ta.onblur = function () { st.hf_model = ta.value; };
-    customEl = ta;
-    row.appendChild(lab); row.appendChild(ta); modelBlock.appendChild(row);
-  }
-}
-
-function cmdRowOf(o) {
-  var row = document.createElement('div'); row.className = 'cmdrow';
-  var say = document.createElement('span'); say.className = 'ce';
-  say.contentEditable = 'true'; say.spellcheck = false;
-  say.textContent = o.say;
-  say.onblur = function () { o.say = say.textContent; };
-  var ins = document.createElement('span'); ins.className = 'ce';
-  ins.contentEditable = 'true'; ins.spellcheck = false;
-  ins.textContent = o.insert;
-  ins.onblur = function () { o.insert = ins.textContent; };
-  var arrow = document.createElement('span'); arrow.textContent = '\u2192';
-  var rm = document.createElement('button'); rm.textContent = 'Remove';
-  rm.onclick = function () {
-    var idx = st.cmds.indexOf(o);
-    if (idx >= 0) st.cmds.splice(idx, 1);
-    for (var k = 0; k < cmdRows.length; k++) {
-      if (cmdRows[k] === row) { cmdRows.splice(k, 1); break; }
-    }
-    row.parentNode.removeChild(row);
-  };
-  row.appendChild(say); row.appendChild(arrow); row.appendChild(ins); row.appendChild(rm);
-  f.appendChild(row);
-  cmdRows.push(row);
-}
-
-function gather() {
-  var c = {};
-  c.trigger_key = st.trigger_key;
-  c.output_mode = st.output_mode;
-  c.engine = st.engine;
-  c.whisper_model = st.whisper_model;
-  c.hf_model = st.hf_model;
-  if (st.engine === 'custom' && customEl && customEl.value.trim()) {
-    c.hf_model = customEl.value.trim();
-  }
-  c.language = st.language || null;
-  c.commands = [];
-  for (var i = 0; i < st.cmds.length; i++) {
-    var o = st.cmds[i];
-    if (o.say.trim()) c.commands.push({ say: o.say.trim(), insert: o.insert });
-  }
-  return c;
-}
-
-selKey = selectField(f, 'Hold-to-talk key:', 'trigger_key', D.keys, null);
-selectField(f, 'Output mode:', 'output_mode', D.outputs, null);
-selectField(f, 'Transcription engine:', 'engine', D.engines, fillModel);
-modelBlock = document.createElement('div');
-f.appendChild(modelBlock);
-fillModel();
-selectField(f, 'Language:', 'language', D.languages, null);
-var head = document.createElement('h3');
-head.textContent = 'Voice shortcuts (say this \u2192 insert that)';
-f.appendChild(head);
-var addBtn = document.createElement('button');
-addBtn.textContent = 'Add voice shortcut';
-addBtn.onclick = function () {
-  var o = { say: '', insert: '' };
-  st.cmds.push(o);
-  cmdRowOf(o);
-};
-f.appendChild(addBtn);
-for (var i0 = 0; i0 < st.cmds.length; i0++) cmdRowOf(st.cmds[i0]);
-
-document.getElementById('btn-detect').onclick = function () {
-  setMsg('Now physically hold the shortcut key you want (up to 12 seconds)...');
-  post('/detect-key', { timeout: 12 }, function (j) {
-    if (j.key) {
-      st.trigger_key = j.key;
-      try { selKey.value = j.key; } catch (err) {}
-      setMsg('Detected "' + keyLabel(j.key) + '". Press "Save settings" to use it as your trigger key.');
-    } else {
-      setMsg('No key was detected - try again.');
-    }
-  });
-};
-
-document.getElementById('btn-save').onclick = function () {
-  setMsg('Saving...');
-  post('/save', { cfg: gather() }, function (j) {
-    setMsg(j.ok ? 'Settings saved - the running app uses them right away.'
-                : 'Save failed: ' + (j.error || 'unknown'));
-  });
-};
-
-document.getElementById('btn-test').onclick = function () {
-  setMsg('Recording 4 seconds - speak now, then wait (the first run downloads the model)...');
-  post('/test-mic', { cfg: gather() }, function (j) {
-    if (j.error) setMsg('Test failed: ' + j.error);
-    else setMsg(j.heard ? 'I heard: "' + j.heard + '"'
-                : 'Nothing recognized - check your microphone or engine.');
-  });
-};
-</script>
-</body>
-</html>
-"""
-
-# Fixed local port so the page can be typed into a browser while the app runs
-# (127.0.0.1 keeps it unreachable from other machines). Falls back to a random
-# port if something else already holds this one (e.g. two app instances).
-PREFERRED_PORT = 47111
-
-SERVER = None
-SETTINGS_URL = None
-LIVE_CFG = None
+def _log_note(msg):
+    path = os.path.join(os.path.dirname(config_mod.CONFIG_PATH), "errors.log")
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
 
 
 def _norm_cfg(raw):
@@ -351,7 +175,7 @@ def _norm_cfg(raw):
     cfg.update(raw or {})
     if not cfg.get("language"):
         cfg["language"] = None
-    if cfg.get("trigger_key") not in KEY_VK:
+    if not _valid_trigger(cfg.get("trigger_key")):
         cfg["trigger_key"] = "f9"
     if not cfg.get("hf_model"):
         cfg["hf_model"] = config_mod.DEFAULTS["hf_model"]
@@ -372,10 +196,316 @@ def _norm_cfg(raw):
     return cfg
 
 
-def _log_note(msg):
-    path = os.path.join(os.path.dirname(config_mod.CONFIG_PATH), "errors.log")
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
+def _valid_trigger(name):
+    if not isinstance(name, str) or not name:
+        return False
+    parts = [p for p in name.split("+") if p.strip()]
+    return bool(parts) and all(p.strip() in KEY_VK for p in parts)
+
+
+# ---------------------------------------------------------------------------
+# Shared live state (written by app.py's hotkey loop, read by the UI)
+# ---------------------------------------------------------------------------
+
+LIVE_STATUS = {"stage": "idle", "detail": "", "ts": ""}
+
+PREFERRED_PORT = 47111
+
+SERVER = None
+SETTINGS_URL = None
+LIVE_CFG = None
+
+
+# ---------------------------------------------------------------------------
+# HTML pages (modern, self-contained, dark UI)
+# ---------------------------------------------------------------------------
+
+_THEME = r"""
+:root{color-scheme:dark;}
+*{box-sizing:border-box;}
+body{font-family:"Segoe UI",system-ui,-apple-system,sans-serif;background:#0e1116;
+     color:#e6e9ee;max-width:860px;margin:0 auto;padding:22px 24px 40px;line-height:1.5;}
+h1{font-size:1.35rem;font-weight:700;letter-spacing:-.01em;}
+h2{font-size:1.05rem;font-weight:650;margin-top:18px;}
+h3{font-size:.98rem;font-weight:650;}
+.note{font-size:.82rem;color:#9aa4b0;}
+code{font-family:"Consolas",monospace;background:#1b2027;padding:1px 5px;border-radius:4px;}
+a{color:#6cb1ff;}
+#msg{position:sticky;top:16px;background:#16202e;color:#f0f5ff;padding:11px 14px;
+     border-radius:10px;font-weight:600;border:1px solid #2b3a52;box-shadow:0 3px 10px #0008;}
+#status{position:sticky;top:52px;background:#16202e;color:#f0f5ff;padding:8px 14px;
+     border-radius:10px;border:1px solid #2b3a52;font-size:.85rem;}
+.chip{display:inline-block;padding:2px 8px;border-radius:6px;font-size:.75rem;font-weight:700;}
+.card{background:#141a22;border:1px solid #232c37;border-radius:12px;padding:14px 16px;
+      margin:14px 0;}
+.row{display:flex;align-items:center;gap:10px;margin:10px 0;}
+.lbl{font-weight:600;min-width:190px;}
+select,textarea{font:inherit;background:#1b2027;color:#e6e9ee;border:1px solid #34404f;
+     border-radius:8px;padding:6px 8px;min-width:130px;}
+option{background:#1b2027;color:#e6e9ee;}
+.ce{background:#1b2027;border:1px solid #34404f;border-radius:8px;padding:4px 9px;
+     min-width:120px;}
+textarea.ce{min-width:240px;white-space:pre-wrap;}
+.cmdrow{display:flex;align-items:center;gap:10px;margin:10px 0;}
+.btns{margin-top:20px;text-align:center;}
+.btns button{margin:0 6px;vertical-align:middle;}
+button{font:inherit;background:#253041;color:#eef3f8;border:1px solid #3a4a66;
+       border-radius:8px;padding:7px 13px;cursor:pointer;}
+button:hover{background:#2e3c52;}
+table{border-collapse:collapse;font-size:.85rem;}
+th,td{padding:6px 9px;border:1px solid #2a3441;text-align:left;vertical-align:middle;}
+thead{background:#1a222c;}
+tr[data-installed]{background:#10202c;}
+.ok{color:#5dd78e;font-weight:700;}
+.no{color:#e0667a;font-weight:600;}
+"""
+
+SETTINGS_PAGE = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device=device,initial-scale=1">
+<title>Voice Dictation settings</title><style>__THEME__</style></head>
+<body>
+<script>window.__INIT__ = __INIT_JSON__;</script>
+<h1>Voice Dictation settings</h1>
+<div class="note">Local-only page (127.0.0.1) - nobody else can open it, so no password.
+Settings save to <code>config.json</code>; the running app uses them right away.</div>
+<div id="msg">Ready. Edit anything below, then press "Save settings". Close this tab when
+you are done - the page stays available while the app runs. The tray icon turns
+<b>red</b> while recording and <b>amber</b> while processing.</div>
+<div id="status">Live status: waiting for the trigger key...</div>
+<form id="f"></form>
+<div class="btns">
+<button id="btn-detect">Detect my key</button>
+<button id="btn-save">Save settings</button>
+<button id="btn-test">Test microphone (4 s)</button>
+</div>
+<div class="note">"Detect my key": press it, then physically hold the shortcut you want (a
+single key like F9, or a combination like Ctrl + F9). Prefer F-keys / Ctrl / Alt / Shift / Win -
+holding a plain letter also types repeated characters into your document.</div>
+<script>
+var D = window.__INIT__.data;
+var st = window.__INIT__.cfg;
+var live = window.__INIT__.live;
+st.language = typeof st.language === 'string' ? st.language : '';
+st.cmds = (st.commands || []).map(function (o) { return { say: o.say || '', insert: o.insert || '' }; });
+
+var f = document.getElementById('f');
+var msgEl = document.getElementById('msg');
+var stEl = document.getElementById('status');
+var stageLabels = {idle:'idle', recording:'Recording (red icon)',
+  processing:'Transcribing (amber icon)', paused:'paused'};
+
+function setMsg(t) { msgEl.textContent = t; }
+function paint() {
+  var s = stEl.querySelector('span');
+  if (!s) { s = document.createElement('span'); stEl.appendChild(s); }
+  var label = stageLabels[live.stage] || live.stage;
+  s.textContent = label + (live.detail ? ' - ' + live.detail : '');
+}
+function pollStatus() {
+  fetch('/status').then(function(r){return r.json();})
+    .then(function(j){ try { for (var k in j) live[k] = j[k]; } catch(e){} paint(); })
+    .catch(function(){});
+}
+
+setMsg('Ready. Edit anything below, then press "Save settings".');
+// Live status auto-refresh while this tab is open.
+window.__poll = function () { pollStatus(); setTimeout(window.__poll, 2000); };
+window.__poll();
+paint();
+
+function post(path, obj, fn) {
+  fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(obj)}).then(function (r) { return r.json(); }).then(fn)
+    .catch(function (e) { setMsg('Could not reach the settings server (' + e +
+      '). The app must be running - start it again, then press Open settings.'); });
+}
+
+function keyLabel(k) { return k.replace(/\+/g,' + '); }
+
+var selKey = null, customEl = null, modelBlock = null;
+var cmdRows = [];
+
+function selectField(parent, name, field, opts, onChange) {
+  var row = document.createElement('div'); row.className = 'row';
+  var lab = document.createElement('span'); lab.className = 'lbl'; lab.textContent = name;
+  var sel = document.createElement('select');
+  sel.onchange = function () { st[field] = sel.value; if (onChange) onChange(); };
+  for (var i = 0; i < opts.length; i++) {
+    var o = document.createElement('option');
+    o.setAttribute('value', opts[i][0]); o.textContent = opts[i][1];
+    var cur = (st[field] === null || st[field] === undefined) ? '' : st[field];
+    if (opts[i][0] === cur) o.selected = true;
+    sel.appendChild(o);
+  }
+  row.appendChild(lab); row.appendChild(sel); parent.appendChild(row);
+  return sel;
+}
+
+function fillModel() {
+  while (modelBlock.firstChild) modelBlock.removeChild(modelBlock.firstChild);
+  customEl = null;
+  if (st.engine === 'whisper') selectField(modelBlock, 'Whisper model size:', 'whisper_model', D.whisper_sizes, null);
+  else if (st.engine === 'canary') selectField(modelBlock, 'Canary preset:', 'hf_model', D.canary, null);
+  else if (st.engine === 'parakeet') selectField(modelBlock, 'Parakeet preset:', 'hf_model', D.parakeet, null);
+  else {
+    var row = document.createElement('div'); row.className = 'row';
+    var lab = document.createElement('span'); lab.className = 'lbl'; lab.textContent = 'Custom model ID:';
+    var ta = document.createElement('textarea'); ta.rows = 1; ta.className = 'ce'; ta.value = st.hf_model || '';
+    ta.onblur = function () { st.hf_model = ta.value; };
+    customEl = ta; row.appendChild(lab); row.appendChild(ta); modelBlock.appendChild(row);
+  }
+}
+
+function cmdRowOf(o) {
+  var row = document.createElement('div'); row.className = 'cmdrow';
+  var say = document.createElement('span'); say.className = 'ce'; say.contentEditable = 'true'; say.spellcheck = false; say.textContent = o.say;
+  say.onblur = function () { o.say = say.textContent; };
+  var ins = document.createElement('span'); ins.className = 'ce'; ins.contentEditable = 'true'; ins.spellcheck = false; ins.textContent = o.insert;
+  ins.onblur = function () { o.insert = ins.textContent; };
+  var arrow = document.createElement('span'); arrow.textContent = '\u2192';
+  var rm = document.createElement('button'); rm.textContent = 'Remove';
+  rm.onclick = function () { var idx = st.cmds.indexOf(o); if (idx >= 0) st.cmds.splice(idx, 1);
+    for (var k = 0; k < cmdRows.length; k++) if (cmdRows[k] === row) { cmdRows.splice(k, 1); break; }
+    row.parentNode.removeChild(row); };
+  row.appendChild(say); row.appendChild(arrow); row.appendChild(ins); row.appendChild(rm);
+  f.appendChild(row); cmdRows.push(row);
+}
+
+function gather() {
+  var c = {};
+  c.trigger_key = st.trigger_key; c.output_mode = st.output_mode; c.engine = st.engine;
+  c.whisper_model = st.whisper_model; c.hf_model = st.hf_model;
+  if (st.engine === 'custom' && customEl && customEl.value.trim()) c.hf_model = customEl.value.trim();
+  c.language = st.language || null;
+  c.commands = [];
+  for (var i = 0; i < st.cmds.length; i++) { var o = st.cmds[i]; if (o.say.trim()) c.commands.push({ say: o.say.trim(), insert: o.insert }); }
+  return c;
+}
+
+selKey = selectField(f, 'Hold-to-talk key:', 'trigger_key', D.keys, null);
+selectField(f, 'Output mode:', 'output_mode', D.outputs, null);
+selectField(f, 'Transcription engine:', 'engine', D.engines, fillModel);
+modelBlock = document.createElement('div'); f.appendChild(modelBlock); fillModel();
+selectField(f, 'Language:', 'language', D.languages, null);
+var head = document.createElement('h3'); head.textContent = 'Voice shortcuts (say this \u2192 insert that)';
+f.appendChild(head);
+var addBtn = document.createElement('button'); addBtn.textContent = 'Add voice shortcut';
+addBtn.onclick = function () { var o = { say: '', insert: '' }; st.cmds.push(o); cmdRowOf(o); };
+f.appendChild(addBtn);
+for (var i0 = 0; i0 < st.cmds.length; i0++) cmdRowOf(st.cmds[i0]);
+
+document.getElementById('btn-detect').onclick = function () {
+  setMsg('Now physically hold the shortcut (up to 12 seconds)...');
+  post('/detect-key', { timeout: 12 }, function (j) {
+    if (j.key) { st.trigger_key = j.key; try { selKey.value = j.key; } catch (err) {}
+      setMsg('Detected "' + keyLabel(j.key) + '". Press "Save settings" to use it.'); }
+    else setMsg('No key was detected - try again.');
+  });
+};
+document.getElementById('btn-save').onclick = function () {
+  setMsg('Saving...');
+  post('/save', { cfg: gather() }, function (j) {
+    setMsg(j.ok ? 'Settings saved - the running app uses them right away.' : 'Save failed: ' + (j.error || 'unknown'));
+  });
+};
+document.getElementById('btn-test').onclick = function () {
+  setMsg('Recording 4 seconds - speak now, then wait (first run downloads the model)...');
+  post('/test-mic', { cfg: gather() }, function (j) {
+    if (j.error) setMsg('Test failed: ' + j.error);
+    else setMsg(j.heard ? 'I heard: "' + j.heard + '"' : 'Nothing recognized - check mic or engine.');
+  });
+};
+</script></body></html>
+"""
+
+MODELS_PAGE = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device=device,initial-scale=1">
+<title>Models - Voice Dictation</title><style>__THEME__
+.modelbar{margin:0 0 8px;}
+#busy{margin:10px 0;padding:8px 12px;background:#16202e;border:1px solid #2b3a52;border-radius:10px;font-weight:600;}
+table{width:100%;}
+thead{background:#16202e;}
+button.small{padding:3px 9px;font-size:.76rem;}
+.modelbar button,button.small{background:#253041;border:1px solid #3a4a66;border-radius:8px;}
+.modelbar button:hover,button.small:hover{background:#2e3c52;}
+</style></head>
+<body>
+<h1>Local models</h1>
+<div class="note">Every model you can select, with whether it is already on your disk.
+A "present" model is used fully offline - no download needed. Download pre-fetches a model
+(needs internet, one time); Delete removes it from the cache. Cache directory:
+<code id="cache">__CACHE__</code></div>
+<div class="modelbar"><button id="btn-refresh">Refresh</button></div>
+<div id="busy"></div>
+<div id="tbl"></div>
+<div class="note">Keep this tab open while a download runs - large models (GB-scale) take a
+few minutes. Rows at the bottom are any other models found in the cache.</div>
+<script>
+var rows = [];
+var cacheEl = document.getElementById('cache');
+var busyEl = document.getElementById('busy');
+var busy = function (t) { busyEl.textContent = t; };
+
+function load() {
+  busy('Loading models...');
+  fetch('/models').then(function(r){return r.json();}).then(function(j){
+    rows = j.rows || []; if (j.cache) cacheEl.textContent = j.cache; busy(''); paint();
+  }).catch(function(e){ busy('Could not reach models: ' + e); });
+}
+
+function paint() {
+  var t = document.getElementById('tbl'); t.innerHTML='';
+  var table = t.appendChild(document.createElement('table'));
+  var thead = table.appendChild(document.createElement('thead'));
+  var hdr = thead.appendChild(document.createElement('tr'));
+  var cols = ['Model','Engine','Status','Size','Actions'];
+  for (var c = 0; c < cols.length; c++) {
+    var th = hdr.appendChild(document.createElement('th')); th.textContent = cols[c];
+  }
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var tr = table.appendChild(document.createElement('tr'));
+    var c0 = tr.appendChild(document.createElement('td')); c0.textContent = r.label;
+    var c1 = tr.appendChild(document.createElement('td')); c1.textContent = r.engine;
+    var c2 = tr.appendChild(document.createElement('td'));
+    c2.textContent = r.installed ? 'present' : 'not downloaded';
+    var c3 = tr.appendChild(document.createElement('td')); c3.textContent = r.size || '-';
+    var c4 = tr.appendChild(document.createElement('td'));
+    if (r.installed) {
+      var delBtn = c4.appendChild(document.createElement('button')); delBtn.className = 'small';
+      delBtn.textContent = 'Delete';
+      delBtn.onclick = function () { act(r, 'delete'); };
+      var reBtn = c4.appendChild(document.createElement('button')); reBtn.className = 'small';
+      reBtn.textContent = 'Re-download';
+      reBtn.onclick = function () { act(r, 'download'); };
+    } else {
+      var dlBtn = c4.appendChild(document.createElement('button')); dlBtn.className = 'small';
+      dlBtn.textContent = 'Download';
+      dlBtn.onclick = function () { act(r, 'download'); };
+    }
+  }
+}
+
+function act(r, kind) {
+  if (!r.repo) { busy('Custom model: set it as the active model on the settings page to fetch it.'); return; }
+  var path = kind === 'download' ? '/models/download' : '/models/delete';
+  busy(kind === 'download'
+    ? 'Downloading "' + r.label + '" - keep this tab open, this can take several minutes...'
+    : 'Deleting "' + r.label + '"...');
+  fetch(path, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({repo: r.repo})})
+    .then(function(x){return x.json();})
+    .then(function(j){
+      if (j.error) busy((kind === 'download' ? 'Download failed: ' : 'Delete failed: ') + j.error);
+      else { busy(kind === 'download' ? 'Downloaded "' + r.label + '".' : 'Deleted "' + r.label + '".'); load(); }
+    })
+    .catch(function(e){ busy('Request failed: ' + e); });
+}
+
+document.getElementById('btn-refresh').onclick = function () { load(); };
+load();
+</script></body></html>
+"""
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -401,10 +531,16 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path in ("/", "/index.html"):
             init = json.dumps(
-                {"cfg": config_mod.load(), "data": _page_data()},
+                {"cfg": config_mod.load(), "data": _page_data(), "live": dict(LIVE_STATUS)},
                 ensure_ascii=False,
             ).replace("</", "<\\/")
-            self._send_text(PAGE.replace("__INIT_JSON__", init))
+            self._send_text(SETTINGS_PAGE.replace("__THEME__", _THEME).replace("__INIT_JSON__", init))
+        elif self.path == "/status":
+            self._send_json(dict(LIVE_STATUS))
+        elif self.path == "/models":
+            self._send_json(_models_listing())
+        elif self.path == "/models.html":
+            self._send_text(MODELS_PAGE.replace("__THEME__", _THEME).replace("__CACHE__", _hf_cache_dir()))
         elif self.path == "/favicon.ico":
             self._send_text("")
         else:
@@ -431,9 +567,7 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 timeout = 10
             key = detect_key(timeout)
-            self._send_json(
-                {"key": key, "error": None if key else "No key detected - try again."}
-            )
+            self._send_json({"key": key, "error": None if key else "No key detected - try again."})
         elif self.path == "/test-mic":
             cfg = _norm_cfg(body.get("cfg"))
             try:
@@ -442,14 +576,125 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"heard": text})
             except Exception as e:
                 self._send_json({"error": str(e)})
+        elif self.path == "/models/download":
+            self._send_json(_model_download(body.get("repo")))
+        elif self.path == "/models/delete":
+            self._send_json(_model_delete(body.get("repo")))
         else:
             self._send_json({"error": "unknown endpoint"})
 
 
-def start_server():
-    """Serve the settings page for the lifetime of the app. Returns the URL.
+def _page_data():
+    return {
+        "keys": [[k, _key_label(k)] for k in TRIGGER_KEYS],
+        "engines": [[e, ENGINE_LABELS[e]] for e in ENGINE_ORDER],
+        "whisper_sizes": [[s, WHISPER_SIZE_LABELS[s]] for s in WHISPER_SIZES],
+        "canary": [[m, label] for m, label in CANARY_MODELS],
+        "parakeet": [[m, label] for m, label in PARAKEET_MODELS],
+        "languages": [[c, label] for c, label in LANGUAGES],
+        "outputs": [[m, label] for m, label in OUTPUT_MODES],
+    }
 
-    The serve thread is a daemon so it never blocks the app from exiting."""
+
+def _models_listing():
+    """Presets + any physically-present model not in the preset list."""
+    cache = _hf_cache_dir()
+    present = {}
+    if os.path.isdir(cache):
+        try:
+            for entry in os.scandir(cache):
+                name = entry.name
+                if not name.startswith("models--"):
+                    continue
+                repo = name[len("models--"):].replace("--", "/")
+                present[repo] = _dir_bytes(entry.path)
+        except OSError:
+            pass
+
+    rows = []
+    seen = set()
+
+    def add(engine, label, repo):
+        r = str(repo)
+        rows.append(
+            {
+                "label": label,
+                "engine": engine,
+                "repo": r,
+                "installed": r in present,
+                "size": _fmt_bytes(present[r]) if r in present else "",
+            }
+        )
+        seen.add(r)
+
+    for size in WHISPER_SIZES:
+        add("whisper", "Whisper " + size, "Systran/faster-whisper-" + size)
+    for repo, label in CANARY_MODELS:
+        add("canary", label, repo)
+    for repo, label in PARAKEET_MODELS:
+        add("parakeet", label, repo)
+
+    # Anything physically present that is not one of the presets above.
+    for repo, _b in sorted(present.items()):
+        if repo not in seen:
+            add("other", repo, repo)
+
+    return {"rows": rows, "cache": cache}
+
+
+def _dir_bytes(path):
+    total = 0
+    for _root, _dirs, files in os.walk(path):
+        for fn in files:
+            try:
+                total += os.path.getsize(os.path.join(_root, fn))
+            except OSError:
+                pass
+    return total
+
+
+def _fmt_bytes(n):
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024:
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024.0
+    return f"{n:.1f} TB"
+
+
+def _model_download(repo):
+    if not repo:
+        return {"error": "no model selected"}
+    try:
+        from huggingface_hub import snapshot_download
+    except Exception:
+        return {"error": "huggingface_hub not available; set this model active and run a test instead"}
+    try:
+        snapshot_download(repo_id=repo)
+        return {"ok": True}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _model_delete(repo):
+    if not repo:
+        return {"error": "no model selected"}
+    cache = _hf_cache_dir()
+    prefix = "models--" + str(repo).replace("/", "--")
+    removed = 0
+    if os.path.isdir(cache):
+        for entry in list(os.scandir(cache)):
+            if entry.name == prefix or entry.name.startswith(prefix + "--"):
+                try:
+                    shutil.rmtree(entry.path)
+                    removed += 1
+                except Exception as e:
+                    return {"error": str(e)}
+    return {"ok": True, "removed": removed}
+
+
+def start_server():
+    """Serve the settings + models pages for the lifetime of the app. Returns the
+    URL. The serve thread is a daemon so it never blocks the app from exiting."""
     global SERVER, SETTINGS_URL
     for port in [PREFERRED_PORT] + [random.randint(49152, 65535) for _ in range(6)]:
         try:
@@ -473,6 +718,15 @@ def open_in_browser():
     if webbrowser.open(SETTINGS_URL):
         return True
     _log_note(f"settings: no browser opened, URL was {SETTINGS_URL}")
+    return False
+
+
+def open_models_in_browser():
+    if not SETTINGS_URL:
+        return False
+    if webbrowser.open(SETTINGS_URL + "models.html"):
+        return True
+    _log_note(f"models: no browser opened, URL was {SETTINGS_URL}models.html")
     return False
 
 

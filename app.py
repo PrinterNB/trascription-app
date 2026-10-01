@@ -39,12 +39,24 @@ def log_error(msg):
 
 
 def key_down(name):
-    raw = ctypes.windll.user32.GetKeyState(KEY_VK.get(name, KEY_VK["f9"]))
-    return bool(raw & 0x8000)
+    # A trigger may be a single key ("f9") or a combination ("ctrl+f9", "win+ctrl"):
+    # all parts must be physically held at once.
+    parts = [p for p in str(name).split("+") if p.strip()]
+    if not parts:
+        parts = ["f9"]
+    for part in parts:
+        vk = KEY_VK.get(part.strip())
+        if vk is None:
+            continue
+        if not (ctypes.windll.user32.GetKeyState(vk) & 0x8000):
+            return False
+    return True
 
 
 def set_status(status):
     STATUS["status"] = status
+    webui.LIVE_STATUS["stage"] = status
+    webui.LIVE_STATUS["ts"] = time.strftime("%Y-%m-%d %H:%M:%S")
     if ICON:
         try:
             ICON.icon = trayicon.image_for(status)
@@ -53,10 +65,14 @@ def set_status(status):
             pass
 
 
+def note(detail):
+    webui.LIVE_STATUS["detail"] = detail
+
+
 def _title():
     return (
         "Voice Dictation - hold "
-        + str(CFG.get("trigger_key", "f9")).upper()
+        + webui._key_label(CFG.get("trigger_key", "f9"))
         + " while you speak, release to dictate"
     )
 
@@ -118,13 +134,16 @@ def hotkey_loop():
             set_status("recording")
             audio, duration = recorder.record_until_key_up(lambda: not key_down(key))
             if duration < 0.5:
+                note(f"released after {duration:.2f}s - too short to dictate")
                 set_status("idle")
                 continue
             set_status("processing")
+            note(f"heard {duration:.1f}s of audio")
             try:
                 text = asr.transcribe(audio, CFG)
             except Exception as e:
                 log_error(f"transcription failed: {e}")
+                note(f"engine error: {e}")
                 set_status("idle")
                 continue
             if text:
@@ -136,6 +155,11 @@ def hotkey_loop():
                         send_keys(text)
                 except Exception as e:
                     log_error(f"output failed: {e}")
+                    note(f"output error: {e}")
+                else:
+                    note(f"typed into focused window ({len(text)} chars)")
+            else:
+                note("nothing recognized (empty text)")
             set_status("idle")
         except Exception as e:
             log_error(f"dictation cycle failed: {e}")
