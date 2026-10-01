@@ -32,14 +32,22 @@ import asr
 KEY_VK = {f"f{i}": 0x70 + i - 1 for i in range(1, 13)}
 KEY_VK.update({"ctrl": 0x11, "alt": 0x12, "shift": 0x10})
 KEY_VK.update({"win": 0xA0, "lwin": 0xA0, "rwin": 0xA1})
+# Named keys so combinations can include them (e.g. "ctrl+space", "f9+space").
+NAMED_KEYS = {
+    "space": 0x20, "tab": 0x09, "enter": 0x0D, "esc": 0x1B, "backspace": 0x08,
+    "minus": 0xBD, "equal": 0xBB, "comma": 0xBC, "period": 0xBE, "slash": 0xBF,
+    "semic": 0xBA, "quote": 0xDB, "grave": 0xC0, "backslash": 0xDC,
+}
+KEY_VK.update(NAMED_KEYS)
 for _c in range(ord("a"), ord("z") + 1):
     KEY_VK[chr(_c)] = _c - 32
 for _d in range(10):
     KEY_VK[str(_d)] = ord(str(_d))
 
 _MODS = ["ctrl", "alt", "shift", "win"]
+_NAMED = list(NAMED_KEYS)
 
-SINGLE_KEYS = [f"f{i}" for i in range(1, 13)] + _MODS
+SINGLE_KEYS = [f"f{i}" for i in range(1, 13)] + _MODS + _NAMED
 SINGLE_KEYS += [chr(c) for c in range(ord("a"), ord("z") + 1)]
 SINGLE_KEYS += [str(d) for d in range(10)]
 
@@ -61,13 +69,20 @@ for _a in range(len(_MODS)):
 TRIGGER_KEYS = SINGLE_KEYS + COMBOS
 
 
+_LABELS = {
+    "ctrl": "Ctrl", "alt": "Alt", "shift": "Shift", "win": "Win",
+    "space": "Space", "tab": "Tab", "enter": "Enter", "esc": "Esc",
+    "backspace": "Backspace", "minus": "-", "equal": "=", "comma": ",",
+    "period": ".", "slash": "/", "semic": ";", "quote": "'", "grave": "`",
+    "backslash": "\\",
+}
+
+
 def _key_label(name):
     if "+" in name:
         return " + ".join(_key_label(p) for p in name.split("+"))
-    if name in ("ctrl", "alt", "shift"):
-        return name.capitalize()
-    if name in ("win", "lwin", "rwin"):
-        return "Win"
+    if name in _LABELS:
+        return _LABELS[name]
     return name.upper()
 
 
@@ -84,6 +99,7 @@ def _detect_order():
     ordered modifiers -> F-keys -> letters -> digits, so a detected combination
     reads like 'Ctrl + Alt + F9'."""
     order = _MODS + [f"f{i}" for i in range(1, 13)]
+    order += ["space", "tab", "enter", "esc", "backspace"]
     order += [chr(c) for c in range(ord("a"), ord("z") + 1)]
     order += [str(d) for d in range(10)]
     seen = set()
@@ -473,7 +489,7 @@ var customKeyEd = null;
     if (!v) return;
     var ok = normCombo(v);
     if (ok) st.trigger_key = ok;
-    else setMsg('That combination has an unknown key - use names like F9, Ctrl, Alt, Shift, Win, A-Z, 0-9 joined with "+".');
+    else setMsg('That combination has an unknown key - use names like F9, Ctrl, Alt, Shift, Win, Space, Tab, Enter, Esc, A-Z, 0-9 joined with "+".');
   };
   customKeyEd = ed;
   row.appendChild(lab); row.appendChild(ed); f.appendChild(row);

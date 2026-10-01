@@ -85,7 +85,8 @@ the tab — the page stays available for the whole time the app runs.
   from the dropdown, or **type your own combination of any number of keys** in the
   "Or type your own combination" box (keys joined with `+`): the listener starts
   recording only when *all* parts are physically held at once, and stops when any
-  one is released.
+  one is released. Named keys are allowed by name: `Space`, `Tab`, `Enter`, `Esc`,
+  `Backspace`, `Minus`, `Comma`, `Period`, `Slash` (e.g. `Ctrl + Space`, `F9 + Space`).
 - **Microphone** — choose which input the recorder uses. The "(default / auto-detect)"
   entry lets `sounddevice` pick; if you have several inputs (or the auto pick records
   silence), select a specific one from the dropdown. If the list shows only "(default /
