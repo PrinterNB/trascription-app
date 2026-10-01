@@ -79,16 +79,47 @@ def _key_held(name):
     return True
 
 
+def _detect_order():
+    """Canonical list of key tokens to watch, one per unique virtual key code,
+    ordered modifiers -> F-keys -> letters -> digits, so a detected combination
+    reads like 'Ctrl + Alt + F9'."""
+    order = _MODS + [f"f{i}" for i in range(1, 13)]
+    order += [chr(c) for c in range(ord("a"), ord("z") + 1)]
+    order += [str(d) for d in range(10)]
+    seen = set()
+    out = []
+    for tok in order:
+        vk = KEY_VK.get(tok)
+        if vk is None or vk in seen:
+            continue
+        seen.add(vk)
+        out.append((tok, vk))
+    return out
+
+
+def _held_keys():
+    """Names of every watched key that is physically held right now."""
+    held = []
+    for tok, vk in _detect_order():
+        if ctypes.windll.user32.GetKeyState(vk) & 0x8000:
+            held.append(tok)
+    return held
+
+
 def detect_key(timeout):
-    """Poll every candidate (single keys and combinations) until one is held
-    physically twice in a row. Combos win over single keys first."""
+    """Detect any combination the user is physically holding - as many keys as
+    they press. Returns the exact "+"-joined combination, once it has been read
+    the same way twice in a row (so partial presses are not misread)."""
     start = time.time()
     while time.time() - start < timeout:
-        for name in COMBOS + SINGLE_KEYS:
-            if _key_held(name):
-                time.sleep(0.1)
-                if _key_held(name):
-                    return name
+        first = _held_keys()
+        if first:
+            time.sleep(0.1)
+            second = _held_keys()
+            # keep only keys still held (drop any released between the two reads)
+            stable = [k for k in first if k in second]
+            if stable:
+                return "+".join(stable)
         time.sleep(0.02)
     return None
 
@@ -308,9 +339,10 @@ you are done - the page stays available while the app runs. The tray icon turns
 <button id="btn-test">Test microphone (4 s)</button>
 <button id="btn-models">Model manager</button>
 </div>
-<div class="note">"Detect my key": press it, then physically hold the shortcut you want (a
-single key like F9, or a combination like Ctrl + F9). Prefer F-keys / Ctrl / Alt / Shift / Win -
-holding a plain letter also types repeated characters into your document.</div>
+<div class="note">"Detect my key": press it, then physically hold the keys you want for a moment
+(a single key like F9, or any combination like Ctrl + F9, or as many keys as you like) - they are
+captured automatically. Prefer F-keys / Ctrl / Alt / Shift / Win: holding a letter or digit also
+types repeated characters into your document.</div>
 <script>
 var D = window.__INIT__.data;
 var st = window.__INIT__.cfg;
@@ -428,6 +460,7 @@ function normCombo(v) {
   }
   return parts.length ? parts.join('+') : null;
 }
+var customKeyEd = null;
 (function () {
   var row = document.createElement('div'); row.className = 'row';
   var lab = document.createElement('span'); lab.className = 'lbl';
@@ -442,6 +475,7 @@ function normCombo(v) {
     if (ok) st.trigger_key = ok;
     else setMsg('That combination has an unknown key - use names like F9, Ctrl, Alt, Shift, Win, A-Z, 0-9 joined with "+".');
   };
+  customKeyEd = ed;
   row.appendChild(lab); row.appendChild(ed); f.appendChild(row);
 })();
 selectField(f, 'Microphone:', 'input_device', D.mics, null);
@@ -457,11 +491,17 @@ f.appendChild(addBtn);
 for (var i0 = 0; i0 < st.cmds.length; i0++) cmdRowOf(st.cmds[i0]);
 
 document.getElementById('btn-detect').onclick = function () {
-  setMsg('Now physically hold the shortcut (up to 12 seconds)...');
+  setMsg('Now physically hold the keys you want (any number, up to 12 seconds)...');
   post('/detect-key', { timeout: 12 }, function (j) {
-    if (j.key) { st.trigger_key = j.key; try { selKey.value = j.key; } catch (err) {}
-      setMsg('Detected "' + keyLabel(j.key) + '". Press "Save settings" to use it.'); }
-    else setMsg('No key was detected - try again.');
+    if (j.key) {
+      st.trigger_key = j.key;
+      if (j.key.indexOf('+') >= 0) { try { selKey.value = selKey.options[0].value; } catch (e1) {}
+        if (customKeyEd) customKeyEd.textContent = j.key; }
+      else { try { selKey.value = j.key; } catch (e2) {} }
+      setMsg('Detected "' + keyLabel(j.key) + '" (any number of keys). Press "Save settings" to use it.');
+    } else {
+      setMsg('No key was detected - hold the keys together and try again.');
+    }
   });
 };
 document.getElementById('btn-save').onclick = function () {
