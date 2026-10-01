@@ -48,10 +48,10 @@ def _hf_transformers(audio, model_id):
 
 
 def _manual_hf(model_id):
-    from transformers import AutoModelForSpeechSeqToText, AutoProcessor
+    from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
 
     def _call(audio):
-        model = AutoModelForSpeechSeqToText.from_pretrained(model_id, trust_remote_code=True)
+        model = AutoModelForSpeechSeq2Seq.from_pretrained(model_id, trust_remote_code=True)
         processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
 
         def run(audio):

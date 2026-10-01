@@ -97,23 +97,13 @@ def set_clipboard(text):
 
 
 def send_keys(text):
-    script = "$s = Object.New('System.Windows.Scripting.Shell')"
-
-    def flush(batch):
-        ps_run(script + batch)
-
-    batch = ""
-    for i, line in enumerate(text.split("\n")):
-        literal = "{" + line.replace("{", "{{").replace("}", "}}") + "}"
-        stmt = "$s.SendKeys('" + literal.replace("'", "''") + "')"
-        if i:
-            stmt = "$s.SendKeys([char]13); " + stmt
-        if len(batch) + len(stmt) > 4000:
-            flush(batch)
-            batch = ""
-        batch += "; " + stmt
-    if batch:
-        flush(batch)
+    vbs = os.path.join(os.path.dirname(config_mod.CONFIG_PATH), "sendkeys.vbs")
+    for chunk in _chunks(text, 3000):
+        r = subprocess.run(
+            ["cscript.exe", "//nologo", vbs, chunk], capture_output=True, text=True
+        )
+        if r.returncode != 0:
+            raise OSError((r.stderr or r.stdout or "sendkeys failed").strip())
 
 
 def hotkey_loop():

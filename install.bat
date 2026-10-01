@@ -32,7 +32,13 @@ echo Generating tray icon...
 python trayicon.py
 
 echo.
-echo All done. To start the app:
-echo     start /b "" .venv\Scripts\pythonw.exe app.py
+echo Creating the one-click launcher (VoiceDictation.bat)...
+python make_launcher.py
+
+echo.
+echo All done. A launcher file was created next to this script:
+echo     VoiceDictation.bat
+echo Copy that file to your desktop (or anywhere) and double-click it to start
+echo the app in your system tray.
 echo.
 pause
