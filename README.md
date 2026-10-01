@@ -19,6 +19,11 @@ transcription is typed into that window. Say a configured shortcut phrase like
 
 ## Setup
 
+Double-click **`install.bat`** — it creates the virtual environment, installs the
+core and optional (Canary/Parakeet) dependencies, and generates the tray icon.
+
+Or step by step:
+
 ```bat
 :: run from this repository's folder
 python -m venv .venv
