@@ -37,8 +37,8 @@ def record_fixed(seconds, samplerate=SAMPLERATE, device=None):
     dev = device if device is not None else _DEVICE
     frames = []
 
-    def collect(_ptr, size, buf):
-        frames.append(buf[:size].copy())
+    def collect(data, _frames, _t, _status):
+        frames.append(numpy.frombuffer(data, dtype=numpy.int16))
 
     with sounddevice.RawInputStream(
         samplerate=samplerate, blocksize=1600, device=dev, dtype="int16", channels=1, callback=collect
@@ -51,8 +51,8 @@ def record_until_key_up(is_key_up, timeout=600, device=None):
     dev = device if device is not None else _DEVICE
     frames = []
 
-    def collect(_ptr, size, buf):
-        frames.append(buf[:size].copy())
+    def collect(data, _frames, _t, _status):
+        frames.append(numpy.frombuffer(data, dtype=numpy.int16))
 
     t0 = time.time()
     duration = 0.0
