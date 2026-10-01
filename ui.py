@@ -69,7 +69,7 @@ def open_settings(cfg):
 
     def add_field(title, values, default):
         sv = tk.StringVar(value=default)
-        widget = tk.OptionMenu(sv, *values)
+        widget = tk.OptionMenu(frm, sv, values[0], *values[1:])
         col = len(field_list) * 2
         ttk.Label(frm, text=title).grid(row=0, column=col, sticky="nw")
         widget.grid(row=1, column=col, sticky="nw")

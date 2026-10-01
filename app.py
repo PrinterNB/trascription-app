@@ -39,7 +39,8 @@ def log_error(msg):
 
 
 def key_down(name):
-    return bool(ctypes.windll.winpapi.GetVirtualKeyState(KEY_VK.get(name, KEY_VK["f9"])))
+    raw = ctypes.windll.user32.GetKeyState(KEY_VK.get(name, KEY_VK["f9"]))
+    return bool(raw & 0x8000)
 
 
 def set_status(status):
@@ -117,34 +118,37 @@ def send_keys(text):
 
 def hotkey_loop():
     while True:
-        if STATUS["paused"]:
-            time.sleep(0.3)
-            continue
-        key = CFG.get("trigger_key", "f9")
-        while not key_down(key):
-            time.sleep(0.03)
-        set_status("recording")
-        audio, duration = recorder.record_until_key_up(lambda: not key_down(key))
-        if duration < 0.5:
-            set_status("idle")
-            continue
-        set_status("processing")
         try:
-            text = asr.transcribe(audio, CFG)
-        except Exception as e:
-            log_error(f"transcription failed: {e}")
-            set_status("idle")
-            continue
-        if text:
-            text = apply_commands(text, CFG.get("commands", []))
+            if STATUS["paused"]:
+                time.sleep(0.3)
+                continue
+            key = CFG.get("trigger_key", "f9")
+            while not key_down(key):
+                time.sleep(0.03)
+            set_status("recording")
+            audio, duration = recorder.record_until_key_up(lambda: not key_down(key))
+            if duration < 0.5:
+                set_status("idle")
+                continue
+            set_status("processing")
             try:
-                if CFG.get("output_mode", "autotype") == "clipboard":
-                    set_clipboard(text)
-                else:
-                    send_keys(text)
+                text = asr.transcribe(audio, CFG)
             except Exception as e:
-                log_error(f"output failed: {e}")
-        set_status("idle")
+                log_error(f"transcription failed: {e}")
+                set_status("idle")
+                continue
+            if text:
+                text = apply_commands(text, CFG.get("commands", []))
+                try:
+                    if CFG.get("output_mode", "autotype") == "clipboard":
+                        set_clipboard(text)
+                    else:
+                        send_keys(text)
+                except Exception as e:
+                    log_error(f"output failed: {e}")
+            set_status("idle")
+        except Exception as e:
+            log_error(f"dictation cycle failed: {e}")
 
 
 def on_settings(_icon, _item):
