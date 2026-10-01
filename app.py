@@ -11,7 +11,7 @@ import config as config_mod
 import recorder
 import asr
 import trayicon
-import ui
+import webui
 
 import tkinter
 from tkinter import messagebox
@@ -19,13 +19,8 @@ from tkinter import messagebox
 import pystray
 from pystray import Icon, Menu, MenuItem
 
-# Virtual key codes for GetVirtualKeyState (polling avoids consuming key events)
-KEY_VK = {f"f{i}": 0x70 + i - 1 for i in range(1, 13)}
-KEY_VK.update({"ctrl": 0x11, "alt": 0x12, "shift": 0x10})
-for _c in range(ord("a"), ord("z") + 1):
-    KEY_VK[chr(_c)] = _c - 32
-for _d in range(10):
-    KEY_VK[str(_d)] = ord(str(_d))
+# Virtual key codes shared with the settings UI (single source of truth).
+KEY_VK = webui.KEY_VK
 
 CFG = config_mod.load()
 STATUS = {"status": "idle", "paused": False}
@@ -142,7 +137,7 @@ def hotkey_loop():
 
 
 def on_settings(_icon, _item):
-    ui.open_settings(CFG)
+    webui.open_settings(CFG)
 
 
 def on_test(_icon, _item):
@@ -180,7 +175,7 @@ MENU = Menu(
 def main():
     global ICON
     if "--settings" in sys.argv[1:]:
-        ui.open_settings(CFG)
+        webui.open_settings(CFG)
         return
     ICON = Icon("Voice Dictation", trayicon.image_for("idle"), _title(), MENU)
     threading.Thread(target=hotkey_loop, name="VoiceDictation", daemon=True).start()

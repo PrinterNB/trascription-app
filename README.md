@@ -12,10 +12,10 @@ transcription is typed into that window. Say a configured shortcut phrase like
 | --- | --- |
 | Speech recognition | [faster-whisper](https://github.com/DeepInsider/faster-whisper) (OpenAI Whisper, CTranslate2, CPU int8) — plus NVIDIA Canary and NVIDIA Parakeet as alternative engines |
 | Tray icon | `pystray` — the app lives in your system tray, no terminal window |
-| Hold-to-talk | any F-key / Ctrl / Alt / Shift / letter / digit, configurable in the UI (default `F9`) |
+| Hold-to-talk | any F-key / Ctrl / Alt / Shift / letter / digit, configurable in the settings UI — or click "Detect my key" and physically press the shortcut you want (default `F9`) |
 | Microphone | `sounddevice` (16 kHz) |
 | Output | types into the focused window (Windows Script Host `SendKeys` via `cscript.exe`) or copies to the clipboard — configurable |
-| Settings | Tk settings window saved to `config.json` |
+| Settings | web page served on `http://127.0.0.1:<random port>` — reachable **only from this machine** (no other LAN user can open it, so no password is needed), saved to `config.json` |
 
 ## Setup
 
@@ -41,8 +41,9 @@ tray. Copy `VoiceDictation.bat` to your Desktop, a folder, or a USB stick — it
 stores absolute paths, so a copy works from anywhere.
 
 - **Right-click the tray icon** → menu: Open settings / Pause listening / Resume
-  listening / Test microphone / Quit.
-- To open just the settings window: `python app.py --settings`
+  listening / Test microphone / Quit. "Open settings" opens the settings page in
+  your browser (this machine only) — press "Done" in the page to close it.
+- To open just the settings page: `python app.py --settings`
 - Status colors: gray = idle, **red = listening to you**, amber = transcribing,
   back to gray when the text was inserted.
 - Debugging: run `.venv\Scripts\python.exe app.py` in a terminal to see errors.
@@ -59,25 +60,35 @@ Speak the shortcut phrases you configured, e.g. "insert email" or "insert card
 number" — they are matched in the transcript (case-insensitive) and replaced with
 whatever you set.
 
-## Settings (in the Tk settings window)
+## Settings (web page)
 
-- **Trigger key** — F1–F12, Ctrl, Alt, Shift, or a letter/digit. Prefer F-keys:
-  holding a letter key also types repeated characters into your document.
-- **Engine** —
-  - `OpenAI Whisper (faster-whisper)` — fast on CPU. Model size is a separate
-    dropdown: `tiny`, `base`, `small`, `medium`, `large-v3`, `large-v3-turbo`
+The settings page is opened from the tray menu (or `python app.py --settings`).
+It is served on `127.0.0.1` with a random port, so only this machine can view it
+— no username/password needed. Press **Save settings** to write `config.json`
+(a running app picks the changes up immediately) and **Done — close settings**
+when you are finished.
+
+- **Trigger key** — pick from the dropdown (F1–F12, Ctrl, Alt, Shift, letter/digit),
+  or press **Detect my key** and then physically hold the shortcut you want:
+  the key is detected and loaded into the dropdown. Prefer F-keys: holding a
+  letter or digit key also types repeated characters into your document.
+- **Engine** — model options shown change automatically to match the engine you
+  select:
+  - `OpenAI Whisper (faster-whisper)` — fast on CPU; shows a model-size dropdown:
+    `tiny`, `base`, `small`, `medium`, `large-v3`, `large-v3-turbo`
     (accuracy vs speed/RAM; `base` is a good start, `small` is noticeably
     better).
-  - `NVIDIA Canary` — multilingual; presets: Canary 180M Flash (EN/ES, fastest),
-    Canary 1B v2 (25 languages), **Canary Qwen 2.5B** (best quality, but heavy
-    on CPU — several GB of RAM, slow).
+  - `NVIDIA Canary` — multilingual; shows Canary presets: 180M Flash (EN/ES,
+    fastest), 1B v2 (25 languages), **Canary Qwen 2.5B** (best quality, but
+    heavy on CPU — several GB of RAM, slow).
   - `NVIDIA Parakeet` — very accurate English ASR (TDT 0.6B v3 also covers
-    26 languages). CPU-friendly.
-  - `Custom model` — any Hugging Face ASR model ID.
+    26 languages); shows Parakeet presets. CPU-friendly.
+  - `Custom model` — shows a free-text field for any Hugging Face ASR model ID.
 - **Language** — auto-detect by default; pick explicitly for better accuracy.
 - **Output mode** — type into the focused window, or copy to clipboard.
 - **Voice shortcuts** — "say this → insert that" rows (e.g. `insert email` →
-  your email).
+  your email): press "Add voice shortcut", type both sides in the boxes,
+  "Remove" deletes a row.
 - **Test microphone** — records 4 s and shows what was recognized (useful for
   debugging mic/engine setup).
 
