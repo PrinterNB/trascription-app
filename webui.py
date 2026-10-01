@@ -147,14 +147,14 @@ textarea.ce{min-width:220px;white-space:pre-wrap;}
 <div class="note">This page is served only to this machine (127.0.0.1) - nobody
 on your network can open it, so no password is needed. Settings are saved to
 <code>config.json</code> in the app folder; the running app uses them right away.</div>
-<div id="msg">Ready. Edit anything below, then press "Save settings". Press
-"Done - close settings" when you are finished.</div>
+<div id="msg">Ready. Edit anything below, then press "Save settings" - the running
+app uses them right away. Close this tab whenever you are done; the page stays
+available while the app runs.</div>
 <form id="f"></form>
 <div class="btns">
 <button id="btn-detect">Detect my key</button>
 <button id="btn-save">Save settings</button>
 <button id="btn-test">Test microphone (4 s)</button>
-<button id="btn-close">Done - close settings</button>
 </div>
 <div class="note">"Detect my key": click the button, then physically hold the shortcut you
 want for a moment - it is captured automatically. Prefer F-keys / Ctrl / Alt / Shift:
@@ -178,7 +178,7 @@ function post(path, obj, fn) {
     .then(fn)
     .catch(function (e) {
       setMsg('Could not reach the settings server (' + e +
-        '). If you pressed "Done" earlier, reopen settings from the tray menu instead.');
+        '). The app must be running - start it again, then press Open settings.');
     });
 }
 
@@ -331,13 +331,6 @@ document.getElementById('btn-test').onclick = function () {
                 : 'Nothing recognized - check your microphone or engine.');
   });
 };
-
-document.getElementById('btn-close').onclick = function () {
-  post('/close', {}, function (j) {
-    setMsg('Settings closed - you may close this tab now. To change settings again, ' +
-      'right-click the tray icon and open settings from its menu.');
-  });
-};
 </script>
 </body>
 </html>
@@ -348,8 +341,9 @@ document.getElementById('btn-close').onclick = function () {
 # port if something else already holds this one (e.g. two app instances).
 PREFERRED_PORT = 47111
 
+SERVER = None
+SETTINGS_URL = None
 LIVE_CFG = None
-_DONE = {}
 
 
 def _norm_cfg(raw):
@@ -445,41 +439,51 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"heard": text})
             except Exception as e:
                 self._send_json({"error": str(e)})
-        elif self.path == "/close":
-            _DONE["closed"] = True
-            self._send_json({"ok": True})
         else:
             self._send_json({"error": "unknown endpoint"})
 
 
-def open_settings(cfg):
-    global LIVE_CFG
-    LIVE_CFG = cfg
-    srv = None
-    ports = [PREFERRED_PORT] + [random.randint(49152, 65535) for _ in range(6)]
-    for port in ports:
+def start_server():
+    """Serve the settings page for the lifetime of the app. Returns the URL.
+
+    The serve thread is a daemon so it never blocks the app from exiting."""
+    global SERVER, SETTINGS_URL
+    for port in [PREFERRED_PORT] + [random.randint(49152, 65535) for _ in range(6)]:
         try:
             srv = HTTPServer(("127.0.0.1", port), Handler)
-            break
         except OSError:
             continue
-    if srv is None:
-        _log_note("settings: could not open a local server port")
+        SERVER = srv
+        SETTINGS_URL = f"http://127.0.0.1:{port}/"
+        threading.Thread(
+            target=srv.serve_forever, name="voice-dictation-settings", daemon=True
+        ).start()
+        return SETTINGS_URL
+    _log_note("settings: could not open a local server port")
+    return None
+
+
+def open_in_browser():
+    """Open the running settings page in a browser; returns True on success."""
+    if not SETTINGS_URL:
+        return False
+    if webbrowser.open(SETTINGS_URL):
+        return True
+    _log_note(f"settings: no browser opened, URL was {SETTINGS_URL}")
+    return False
+
+
+def open_settings_standalone(cfg):
+    """Debug entry: run just the settings server + browser; Ctrl+Q to exit."""
+    global LIVE_CFG
+    LIVE_CFG = cfg
+    url = start_server()
+    if not url:
         return
-    url = f"http://127.0.0.1:{port}/"
-    if not webbrowser.open(url):
-        _log_note(f"settings: no browser opened, URL was {url}")
-    _DONE.clear()
-    _DONE["closed"] = False
-    threading.Thread(
-        target=srv.serve_forever, name="voice-dictation-settings"
-    ).start()
-    try:
-        while not _DONE["closed"]:
-            time.sleep(0.3)
-    finally:
-        srv.shutdown()  # blocks until the serve_forever thread has finished
+    open_in_browser()
+    print(f"Settings page at {url}; close the tab when done, then press Ctrl+Q.")
+    threading.Event().wait()
 
 
 if __name__ == "__main__":
-    open_settings(config_mod.load())
+    open_settings_standalone(config_mod.load())

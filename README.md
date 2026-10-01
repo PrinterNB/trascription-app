@@ -41,12 +41,14 @@ tray. Copy `VoiceDictation.bat` to your Desktop, a folder, or a USB stick — it
 stores absolute paths, so a copy works from anywhere.
 
 - **Right-click the tray icon** → menu: Open settings / Pause listening / Resume
-  listening / Test microphone / Quit. "Open settings" opens the settings page in
-  your browser (this machine only) — press "Done" in the page to close it.
+  listening / Test microphone / Quit. "Open settings" just opens the settings page
+  in your browser and returns immediately — the tray menu keeps working while the
+  page is open, and closing the browser tab is all it takes to be done.
 - While the app is running, you can also open the settings page directly in your
   browser at `http://127.0.0.1:47111` (typing `127.0.0.1` **without** that port
   hits port 80, not the app — that shows "didn't send any data").
-- To open just the settings page: `python app.py --settings`
+- To run just the settings page (debugging): `python app.py --settings` — it
+  prints the URL; press Ctrl+Q in the terminal to quit.
 - Status colors: gray = idle, **red = listening to you**, amber = transcribing,
   back to gray when the text was inserted.
 - Debugging: run `.venv\Scripts\python.exe app.py` in a terminal to see errors.
@@ -65,11 +67,12 @@ whatever you set.
 
 ## Settings (web page)
 
-The settings page is opened from the tray menu (or `python app.py --settings`).
-It is served on `127.0.0.1` with a random port, so only this machine can view it
+The settings page is opened from the tray menu (or `python app.py --settings`),
+or — while the app is running — by typing `http://127.0.0.1:47111` in your
+browser. It is served on `127.0.0.1`, so only this machine can view it
 — no username/password needed. Press **Save settings** to write `config.json`
-(a running app picks the changes up immediately) and **Done — close settings**
-when you are finished.
+(a running app picks the changes up immediately); when you are done, just close
+the tab — the page stays available for the whole time the app runs.
 
 - **Trigger key** — pick from the dropdown (F1–F12, Ctrl, Alt, Shift, letter/digit),
   or press **Detect my key** and then physically hold the shortcut you want:

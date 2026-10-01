@@ -137,7 +137,7 @@ def hotkey_loop():
 
 
 def on_settings(_icon, _item):
-    webui.open_settings(CFG)
+    webui.open_in_browser()
 
 
 def on_test(_icon, _item):
@@ -175,8 +175,10 @@ MENU = Menu(
 def main():
     global ICON
     if "--settings" in sys.argv[1:]:
-        webui.open_settings(CFG)
+        webui.open_settings_standalone(CFG)
         return
+    webui.LIVE_CFG = CFG
+    webui.start_server()
     ICON = Icon("Voice Dictation", trayicon.image_for("idle"), _title(), MENU)
     threading.Thread(target=hotkey_loop, name="VoiceDictation", daemon=True).start()
     ICON.run()
