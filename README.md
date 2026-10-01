@@ -40,10 +40,11 @@ Double-click **`VoiceDictation.bat`** — the installer creates it next to
 tray. Copy `VoiceDictation.bat` to your Desktop, a folder, or a USB stick — it
 stores absolute paths, so a copy works from anywhere.
 
-- **Right-click the tray icon** → menu: Open settings / Pause listening / Resume
-  listening / Test microphone / Quit. "Open settings" just opens the settings page
-  in your browser and returns immediately — the tray menu keeps working while the
-  page is open, and closing the browser tab is all it takes to be done.
+- **Right-click the tray icon** → menu: Open settings / **Model manager** / Pause
+  listening / Resume listening / Test microphone / Quit. "Open settings" and
+  "Model manager" just open the relevant page in your browser and return
+  immediately — the tray menu keeps working while the page is open, and closing
+  the browser tab is all it takes to be done.
 - While the app is running, you can also open the settings page directly in your
   browser at `http://127.0.0.1:47111` (typing `127.0.0.1` **without** that port
   hits port 80, not the app — that shows "didn't send any data").

@@ -277,6 +277,7 @@ you are done - the page stays available while the app runs. The tray icon turns
 <button id="btn-detect">Detect my key</button>
 <button id="btn-save">Save settings</button>
 <button id="btn-test">Test microphone (4 s)</button>
+<button id="btn-models">Model manager</button>
 </div>
 <div class="note">"Detect my key": press it, then physically hold the shortcut you want (a
 single key like F9, or a combination like Ctrl + F9). Prefer F-keys / Ctrl / Alt / Shift / Win -
@@ -414,6 +415,11 @@ document.getElementById('btn-test').onclick = function () {
     if (j.error) setMsg('Test failed: ' + j.error);
     else setMsg(j.heard ? 'I heard: "' + j.heard + '"' : 'Nothing recognized - check mic or engine.');
   });
+};
+document.getElementById('btn-models').onclick = function () {
+  var w = window.open('/models.html', '_models');
+  if (!w) w = window.open('/models.html', '_blank');
+  setMsg('Opened the Model manager in a new tab - pre-download models or delete unused ones there.');
 };
 </script></body></html>
 """

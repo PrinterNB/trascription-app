@@ -169,6 +169,10 @@ def on_settings(_icon, _item):
     webui.open_in_browser()
 
 
+def on_models(_icon, _item):
+    webui.open_models_in_browser()
+
+
 def on_test(_icon, _item):
     audio = recorder.record_fixed(4)
     try:
@@ -194,6 +198,7 @@ def on_resume(_icon, _item):
 
 MENU = Menu(
     MenuItem("Open settings", on_settings),
+    MenuItem("Model manager", on_models),
     MenuItem("Pause listening", on_pause, checked=lambda _icon: STATUS["paused"]),
     MenuItem("Resume listening", on_resume, checked=lambda _icon: not STATUS["paused"]),
     MenuItem("Test microphone", on_test),
