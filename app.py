@@ -53,6 +53,15 @@ def key_down(name):
     return True
 
 
+def mic_device():
+    """Selected microphone index (>=0), or None to let the recorder auto-pick."""
+    try:
+        d = int(CFG.get("input_device", -1))
+    except (TypeError, ValueError):
+        return None
+    return d if d >= 0 else None
+
+
 def set_status(status):
     STATUS["status"] = status
     webui.LIVE_STATUS["stage"] = status
@@ -132,9 +141,13 @@ def hotkey_loop():
             while not key_down(key):
                 time.sleep(0.03)
             set_status("recording")
-            audio, duration = recorder.record_until_key_up(lambda: not key_down(key))
+            audio, duration = recorder.record_until_key_up(lambda: not key_down(key), device=mic_device())
             if duration < 0.5:
                 note(f"released after {duration:.2f}s - too short to dictate")
+                set_status("idle")
+                continue
+            if recorder.peak(audio) < 0.002:
+                note(f"heard {duration:.1f}s of SILENCE - microphone not capturing")
                 set_status("idle")
                 continue
             set_status("processing")

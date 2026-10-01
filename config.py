@@ -11,6 +11,7 @@ DEFAULTS = {
     "hf_model": "nvidia/canary-180m-flash",
     "language": None,
     "commands": [],
+    "input_device": -1,
 }
 
 

@@ -79,9 +79,16 @@ the tab — the page stays available for the whole time the app runs.
   or press **Detect my key** and then physically hold the shortcut you want:
   the key is detected and loaded into the dropdown. Prefer F-keys: holding a
   letter or digit key also types repeated characters into your document.
-  You can also choose a **combination** (e.g. `Ctrl + F9` or `Win + Ctrl`): the
-  listener starts recording only when *all* parts are physically held at once,
-  and stops when any is released.
+  You can also choose a **combination** (e.g. `Ctrl + F9` or `Win + Ctrl`) — pick one
+  from the dropdown, or **type your own combination of any number of keys** in the
+  "Or type your own combination" box (keys joined with `+`): the listener starts
+  recording only when *all* parts are physically held at once, and stops when any
+  one is released.
+- **Microphone** — choose which input the recorder uses. The "(default / auto-detect)"
+  entry lets `sounddevice` pick; if you have several inputs (or the auto pick records
+  silence), select a specific one from the dropdown. If the list shows only "(default /
+  auto-detect)", this machine exposes no microphone input through the app's audio
+  backend - use an actual microphone (Windows permission allowed) or a headset mic.
 - **Engine** — model options shown change automatically to match the engine you
   select:
   - `OpenAI Whisper (faster-whisper)` — fast on CPU; shows a model-size dropdown:

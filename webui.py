@@ -43,8 +43,9 @@ SINGLE_KEYS = [f"f{i}" for i in range(1, 13)] + _MODS
 SINGLE_KEYS += [chr(c) for c in range(ord("a"), ord("z") + 1)]
 SINGLE_KEYS += [str(d) for d in range(10)]
 
-# Combination triggers: modifier pairs and modifier+F-key. The listener keys off
-# the whole combination - every part must be physically held at once.
+# Combination triggers of any length (modifier pairs, modifier+F, modifier+modifier+F).
+# These are convenience presets - you can also type any combination yourself in the
+# settings UI; the app accepts a "+"-joined key string of any length.
 COMBOS = []
 for _a in range(len(_MODS)):
     for _b in range(_a + 1, len(_MODS)):
@@ -52,6 +53,10 @@ for _a in range(len(_MODS)):
 for _m in _MODS:
     for _i in range(1, 13):
         COMBOS.append(_m + "+f" + str(_i))
+for _a in range(len(_MODS)):
+    for _b in range(_a + 1, len(_MODS)):
+        for _i in range(1, 13):
+            COMBOS.append(_MODS[_a] + "+" + _MODS[_b] + "+f" + str(_i))
 
 TRIGGER_KEYS = SINGLE_KEYS + COMBOS
 
@@ -177,6 +182,11 @@ def _norm_cfg(raw):
         cfg["language"] = None
     if not _valid_trigger(cfg.get("trigger_key")):
         cfg["trigger_key"] = "f9"
+    try:
+        di = int(cfg.get("input_device", -1))
+    except (TypeError, ValueError):
+        di = -1
+    cfg["input_device"] = di if di >= -1 else -1
     if not cfg.get("hf_model"):
         cfg["hf_model"] = config_mod.DEFAULTS["hf_model"]
     if cfg.get("engine") not in ENGINE_ORDER:
@@ -201,6 +211,25 @@ def _valid_trigger(name):
         return False
     parts = [p for p in name.split("+") if p.strip()]
     return bool(parts) and all(p.strip() in KEY_VK for p in parts)
+
+
+def _mic_options():
+    """Selectable microphone inputs: [-1, '(default / auto-detect)'] plus each real
+    input device as [index, '[index] name']."""
+    out = [[-1, "(default / auto-detect)"]]
+    try:
+        import sounddevice
+
+        for i, d in enumerate(sounddevice.query_devices()):
+            try:
+                if str(d.get("type", "")).upper().startswith("INPUT") and d.get("channels", 0) > 0:
+                    name = str(d.get("name", "")) or "input"
+                    out.append([i, f"[{i}] {name}"])
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +363,7 @@ function selectField(parent, name, field, opts, onChange) {
   for (var i = 0; i < opts.length; i++) {
     var o = document.createElement('option');
     o.setAttribute('value', opts[i][0]); o.textContent = opts[i][1];
-    var cur = (st[field] === null || st[field] === undefined) ? '' : st[field];
+    var cur = (st[field] === null || st[field] === undefined) ? '' : String(st[field]);
     if (opts[i][0] === cur) o.selected = true;
     sel.appendChild(o);
   }
@@ -378,12 +407,44 @@ function gather() {
   c.whisper_model = st.whisper_model; c.hf_model = st.hf_model;
   if (st.engine === 'custom' && customEl && customEl.value.trim()) c.hf_model = customEl.value.trim();
   c.language = st.language || null;
+  c.input_device = -1;
+  try { var di = parseInt(st.input_device, 10); if (!isNaN(di)) c.input_device = di; } catch (e2) { c.input_device = -1; }
   c.commands = [];
   for (var i = 0; i < st.cmds.length; i++) { var o = st.cmds[i]; if (o.say.trim()) c.commands.push({ say: o.say.trim(), insert: o.insert }); }
   return c;
 }
 
 selKey = selectField(f, 'Hold-to-talk key:', 'trigger_key', D.keys, null);
+var _validKey = {};
+for (var _kn = 0; _kn < D.keynames.length; _kn++) _validKey[D.keynames[_kn]] = 1;
+function normCombo(v) {
+  var t = (v || '').toLowerCase(), parts = [];
+  var toks = t.split('+');
+  for (var ti = 0; ti < toks.length; ti++) {
+    var p = toks[ti].trim();
+    if (!p) continue;
+    if (!_validKey[p]) return null;
+    parts.push(p);
+  }
+  return parts.length ? parts.join('+') : null;
+}
+(function () {
+  var row = document.createElement('div'); row.className = 'row';
+  var lab = document.createElement('span'); lab.className = 'lbl';
+  lab.textContent = 'Or type your own combination:';
+  var ed = document.createElement('span'); ed.className = 'ce'; ed.contentEditable = 'true'; ed.spellcheck = false;
+  var curCombo = String(st.trigger_key || '');
+  ed.textContent = (curCombo.indexOf('+') >= 0 && normCombo(curCombo)) ? curCombo : '';
+  ed.onblur = function () {
+    var v = (ed.textContent || '').trim();
+    if (!v) return;
+    var ok = normCombo(v);
+    if (ok) st.trigger_key = ok;
+    else setMsg('That combination has an unknown key - use names like F9, Ctrl, Alt, Shift, Win, A-Z, 0-9 joined with "+".');
+  };
+  row.appendChild(lab); row.appendChild(ed); f.appendChild(row);
+})();
+selectField(f, 'Microphone:', 'input_device', D.mics, null);
 selectField(f, 'Output mode:', 'output_mode', D.outputs, null);
 selectField(f, 'Transcription engine:', 'engine', D.engines, fillModel);
 modelBlock = document.createElement('div'); f.appendChild(modelBlock); fillModel();
@@ -413,7 +474,9 @@ document.getElementById('btn-test').onclick = function () {
   setMsg('Recording 4 seconds - speak now, then wait (first run downloads the model)...');
   post('/test-mic', { cfg: gather() }, function (j) {
     if (j.error) setMsg('Test failed: ' + j.error);
-    else setMsg(j.heard ? 'I heard: "' + j.heard + '"' : 'Nothing recognized - check mic or engine.');
+    else if (j.note === 'silence') setMsg('The microphone recorded SILENCE - pick a different "Microphone" in this UI (default/auto may be the wrong input).');
+    else if (j.heard) setMsg('I heard: "' + j.heard + '"');
+    else setMsg('Mic captured ' + (j.seconds || 0) + 's at ' + Math.round((j.peak || 0) * 1000) / 10 + '% loudness but nothing was recognized - speak louder, or change engine/language.');
   });
 };
 document.getElementById('btn-models').onclick = function () {
@@ -577,9 +640,18 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/test-mic":
             cfg = _norm_cfg(body.get("cfg"))
             try:
-                audio = recorder.record_fixed(4)
+                di = int(cfg["input_device"]) if int(cfg["input_device"]) >= 0 else None
+                audio = recorder.record_fixed(4, device=di)
+                seconds = len(audio) / recorder.SAMPLERATE
+                pk = recorder.peak(audio)
                 text = asr.transcribe(audio, cfg)
-                self._send_json({"heard": text})
+                out = {
+                    "heard": text,
+                    "seconds": round(seconds, 1),
+                    "peak": round(pk, 4),
+                    "note": "silence" if pk < 0.002 else None,
+                }
+                self._send_json(out)
             except Exception as e:
                 self._send_json({"error": str(e)})
         elif self.path == "/models/download":
@@ -593,6 +665,8 @@ class Handler(BaseHTTPRequestHandler):
 def _page_data():
     return {
         "keys": [[k, _key_label(k)] for k in TRIGGER_KEYS],
+        "keynames": list(KEY_VK.keys()),
+        "mics": [[str(i), label] for i, label in _mic_options()],
         "engines": [[e, ENGINE_LABELS[e]] for e in ENGINE_ORDER],
         "whisper_sizes": [[s, WHISPER_SIZE_LABELS[s]] for s in WHISPER_SIZES],
         "canary": [[m, label] for m, label in CANARY_MODELS],
