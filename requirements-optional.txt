@@ -1,0 +1,4 @@
+# Optional: NVIDIA Canary / Parakeet / custom Hugging Face models
+transformers>=4.51
+torch
+torchaudio

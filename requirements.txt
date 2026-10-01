@@ -1,0 +1,7 @@
+# Core (tray app, microphone, Whisper engine)
+faster-whisper
+ctranslate2
+numpy
+sounddevice
+pystray
+pillow
