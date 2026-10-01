@@ -13,7 +13,7 @@ transcription is typed into that window. Say a configured shortcut phrase like
 | Speech recognition | [faster-whisper](https://github.com/DeepInsider/faster-whisper) (OpenAI Whisper, CTranslate2, CPU int8) — plus NVIDIA Canary and NVIDIA Parakeet as alternative engines |
 | Tray icon | `pystray` — the app lives in your system tray, no terminal window |
 | Hold-to-talk | any F-key / Ctrl / Alt / Shift / letter / digit, configurable in the settings UI — or click "Detect my key" and physically press the shortcut you want (default `F9`) |
-| Microphone | `sounddevice` (16 kHz) |
+| Microphone | Windows DirectShow sources via `ffmpeg` (the real system mic list), with `sounddevice`/PortAudio as a fallback |
 | Output | types into the focused window (Windows Script Host `SendKeys` via `cscript.exe`) or copies to the clipboard — configurable |
 | Settings | web page served on `http://127.0.0.1:47111` — reachable **only from this machine** (no other LAN user can open it, so no password is needed), saved to `config.json` |
 
@@ -21,6 +21,11 @@ transcription is typed into that window. Say a configured shortcut phrase like
 
 Double-click **`install.bat`** — it creates the virtual environment, installs the
 core and optional (Canary/Parakeet) dependencies, and generates the tray icon.
+
+The recorder captures audio through **ffmpeg** (DirectShow) whenever PortAudio
+sees no usable input — this is what makes the "Microphone" dropdown show every
+Windows source. Keep a recent `ffmpeg` on your `PATH` (it is a system tool, not
+a Python package); without it the app still works through PortAudio inputs only.
 
 Or step by step:
 
@@ -87,11 +92,15 @@ the tab — the page stays available for the whole time the app runs.
   recording only when *all* parts are physically held at once, and stops when any
   one is released. Named keys are allowed by name: `Space`, `Tab`, `Enter`, `Esc`,
   `Backspace`, `Minus`, `Comma`, `Period`, `Slash` (e.g. `Ctrl + Space`, `F9 + Space`).
-- **Microphone** — choose which input the recorder uses. The "(default / auto-detect)"
-  entry lets `sounddevice` pick; if you have several inputs (or the auto pick records
-  silence), select a specific one from the dropdown. If the list shows only "(default /
-  auto-detect)", this machine exposes no microphone input through the app's audio
-  backend - use an actual microphone (Windows permission allowed) or a headset mic.
+- **Microphone** — choose which audio source the recorder uses. The dropdown lists
+  every Windows microphone/input the OS exposes (through DirectShow — the same list
+  the OS shows, headset mics included), plus any PortAudio input when present.
+  "Auto (system default)" picks the best real microphone. If one source records
+  silence, switch to another in this dropdown and re-run "Test microphone" — the
+  test now says exactly what each source produced ("no audio returned" vs
+  "recorded silence"), so you can prove the problem is the source, not the app.
+  Listing the Windows sources requires `ffmpeg` on `PATH` (the recorder captures
+  through ffmpeg's DirectShow interface when PortAudio sees no usable input).
 - **Engine** — model options shown change automatically to match the engine you
   select:
   - `OpenAI Whisper (faster-whisper)` — fast on CPU; shows a model-size dropdown:

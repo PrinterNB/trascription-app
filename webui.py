@@ -229,11 +229,17 @@ def _norm_cfg(raw):
         cfg["language"] = None
     if not _valid_trigger(cfg.get("trigger_key")):
         cfg["trigger_key"] = "f9"
-    try:
-        di = int(cfg.get("input_device", -1))
-    except (TypeError, ValueError):
-        di = -1
-    cfg["input_device"] = di if di >= -1 else -1
+    mic = cfg.get("input_device", "")
+    if isinstance(mic, str):
+        s = mic.strip()
+        ok = (s == "" or s == "-1" or s.startswith("ds:") or s.startswith("sd:"))
+        cfg["input_device"] = "" if (not ok or s == "-1") else s
+    else:
+        try:
+            di = int(mic)
+        except (TypeError, ValueError):
+            di = -1
+        cfg["input_device"] = ("sd:%d" % di) if di >= 0 else ""
     if not cfg.get("hf_model"):
         cfg["hf_model"] = config_mod.DEFAULTS["hf_model"]
     if cfg.get("engine") not in ENGINE_ORDER:
@@ -261,9 +267,16 @@ def _valid_trigger(name):
 
 
 def _mic_options():
-    """Selectable microphone inputs: [-1, '(default / auto-detect)'] plus each real
-    input device as [index, '[index] name']."""
-    out = [[-1, "(default / auto-detect)"]]
+    """Selectable audio sources: auto + every Windows source DirectShow sees,
+    plus any PortAudio input (tokens: '', 'ds:<name>', 'sd:<idx>')."""
+    out = [["", "Auto (system default)"]]
+    try:
+        import recorder
+
+        for name in recorder._list_dshow():
+            out.append(["ds:" + name, name])
+    except Exception:
+        pass
     try:
         import sounddevice
 
@@ -271,7 +284,7 @@ def _mic_options():
             try:
                 if str(d.get("type", "")).upper().startswith("INPUT") and d.get("channels", 0) > 0:
                     name = str(d.get("name", "")) or "input"
-                    out.append([i, f"[{i}] {name}"])
+                    out.append(["sd:%d" % i, "[PortAudio %d] %s" % (i, name)])
             except Exception:
                 continue
     except Exception:
@@ -455,8 +468,7 @@ function gather() {
   c.whisper_model = st.whisper_model; c.hf_model = st.hf_model;
   if (st.engine === 'custom' && customEl && customEl.value.trim()) c.hf_model = customEl.value.trim();
   c.language = st.language || null;
-  c.input_device = -1;
-  try { var di = parseInt(st.input_device, 10); if (!isNaN(di)) c.input_device = di; } catch (e2) { c.input_device = -1; }
+  c.input_device = String(st.input_device === null || st.input_device === undefined ? '' : st.input_device);
   c.commands = [];
   for (var i = 0; i < st.cmds.length; i++) { var o = st.cmds[i]; if (o.say.trim()) c.commands.push({ say: o.say.trim(), insert: o.insert }); }
   return c;
@@ -530,6 +542,7 @@ document.getElementById('btn-test').onclick = function () {
   setMsg('Recording 4 seconds - speak now, then wait (first run downloads the model)...');
   post('/test-mic', { cfg: gather() }, function (j) {
     if (j.error) setMsg('Test failed: ' + j.error);
+    else if (j.note && j.note.indexOf('no audio') === 0) setMsg('That source returned NO AUDIO at all - it is not a usable microphone; pick another one in this dropdown.');
     else if (j.note === 'silence') setMsg('The microphone recorded SILENCE - pick a different "Microphone" in this UI (default/auto may be the wrong input).');
     else if (j.heard) setMsg('I heard: "' + j.heard + '"');
     else setMsg('Mic captured ' + (j.seconds || 0) + 's at ' + Math.round((j.peak || 0) * 1000) / 10 + '% loudness but nothing was recognized - speak louder, or change engine/language.');
@@ -696,8 +709,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/test-mic":
             cfg = _norm_cfg(body.get("cfg"))
             try:
-                di = int(cfg["input_device"]) if int(cfg["input_device"]) >= 0 else None
-                audio = recorder.record_fixed(4, device=di)
+                audio = recorder.record_fixed(4, device=cfg["input_device"])
                 seconds = len(audio) / recorder.SAMPLERATE
                 pk = recorder.peak(audio)
                 text = asr.transcribe(audio, cfg)
@@ -705,7 +717,8 @@ class Handler(BaseHTTPRequestHandler):
                     "heard": text,
                     "seconds": round(seconds, 1),
                     "peak": round(pk, 4),
-                    "note": "silence" if pk < 0.002 else None,
+                    "note": ("no audio returned - that source produced nothing"
+                             if seconds == 0 else ("silence" if pk < 0.002 else None)),
                 }
                 self._send_json(out)
             except Exception as e:
@@ -722,7 +735,7 @@ def _page_data():
     return {
         "keys": [[k, _key_label(k)] for k in TRIGGER_KEYS],
         "keynames": list(KEY_VK.keys()),
-        "mics": [[str(i), label] for i, label in _mic_options()],
+        "mics": [[v, label] for v, label in _mic_options()],
         "engines": [[e, ENGINE_LABELS[e]] for e in ENGINE_ORDER],
         "whisper_sizes": [[s, WHISPER_SIZE_LABELS[s]] for s in WHISPER_SIZES],
         "canary": [[m, label] for m, label in CANARY_MODELS],

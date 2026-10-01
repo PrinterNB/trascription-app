@@ -54,12 +54,10 @@ def key_down(name):
 
 
 def mic_device():
-    """Selected microphone index (>=0), or None to let the recorder auto-pick."""
-    try:
-        d = int(CFG.get("input_device", -1))
-    except (TypeError, ValueError):
-        return None
-    return d if d >= 0 else None
+    """Selected microphone token: '' = auto, 'ds:<name>' = DirectShow source,
+    'sd:<idx>' = PortAudio input. The recorder resolves the token."""
+    v = CFG.get("input_device", "")
+    return v if isinstance(v, str) else ""
 
 
 def set_status(status):
@@ -142,6 +140,10 @@ def hotkey_loop():
                 time.sleep(0.03)
             set_status("recording")
             audio, duration = recorder.record_until_key_up(lambda: not key_down(key), device=mic_device())
+            if len(audio) == 0:
+                note("the selected microphone returned no audio - pick another source in the settings UI")
+                set_status("idle")
+                continue
             if duration < 0.5:
                 note(f"released after {duration:.2f}s - too short to dictate")
                 set_status("idle")

@@ -5,3 +5,6 @@ numpy
 sounddevice
 pystray
 pillow
+# Note: microphone capture on Windows also uses ffmpeg (DirectShow) as a system
+# tool on PATH — not a pip package. Without it the app falls back to PortAudio
+# inputs only.

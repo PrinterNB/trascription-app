@@ -11,7 +11,9 @@ DEFAULTS = {
     "hf_model": "nvidia/canary-180m-flash",
     "language": None,
     "commands": [],
-    "input_device": -1,
+    # Microphone source: "" = auto-pick, "ds:<name>" = Windows/DirectShow source
+    # (the real mic list), "sd:<idx>" = PortAudio input index.
+    "input_device": "",
 }
 
 
