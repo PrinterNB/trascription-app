@@ -20,7 +20,7 @@ transcription is typed into that window. Say a configured shortcut phrase like
 ## Setup
 
 ```bat
-cd C:\Users\parke\OneDrive\Documents\Code\Other\trascription-app
+:: run from this repository's folder
 python -m venv .venv
 call .venv\Scripts\activate.bat
 pip install -r requirements.txt
