@@ -379,6 +379,9 @@ def _log_note(msg):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def log_message(self, _fmt, *_args):
+        pass  # no console access logs (pythonw has no stderr anyway)
+
     def _send_text(self, body):
         data = body.encode("utf-8")
         self.send_response(200)

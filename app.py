@@ -19,6 +19,11 @@ from tkinter import messagebox
 import pystray
 from pystray import Icon, Menu, MenuItem
 
+# pythonw.exe (windowed, how the launcher starts us) has no sys.stderr; give
+# anything that prints (tqdm, http logs) a sink so nothing raises.
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
+
 # Virtual key codes shared with the settings UI (single source of truth).
 KEY_VK = webui.KEY_VK
 
