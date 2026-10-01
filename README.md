@@ -76,9 +76,11 @@ browser. It is served on `127.0.0.1`, so only this machine can view it
 the tab — the page stays available for the whole time the app runs.
 
 - **Trigger key** — pick from the dropdown (F1–F12, Ctrl, Alt, Shift, Win, letter/digit),
-  or press **Detect my key** and then physically hold the shortcut you want:
-  the key is detected and loaded into the dropdown. Prefer F-keys: holding a
-  letter or digit key also types repeated characters into your document.
+  or press **Detect my key** and then physically hold **any number of keys together**
+  for a moment (a single key, a combination like `Ctrl + F9`, or as many keys as you
+  like): the exact keys you are holding are captured and used as your trigger
+  combination. Prefer F-keys: holding a letter or digit also types repeated characters
+  into your document.
   You can also choose a **combination** (e.g. `Ctrl + F9` or `Win + Ctrl`) — pick one
   from the dropdown, or **type your own combination of any number of keys** in the
   "Or type your own combination" box (keys joined with `+`): the listener starts
