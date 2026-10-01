@@ -15,7 +15,7 @@ transcription is typed into that window. Say a configured shortcut phrase like
 | Hold-to-talk | any F-key / Ctrl / Alt / Shift / letter / digit, configurable in the settings UI — or click "Detect my key" and physically press the shortcut you want (default `F9`) |
 | Microphone | `sounddevice` (16 kHz) |
 | Output | types into the focused window (Windows Script Host `SendKeys` via `cscript.exe`) or copies to the clipboard — configurable |
-| Settings | web page served on `http://127.0.0.1:<random port>` — reachable **only from this machine** (no other LAN user can open it, so no password is needed), saved to `config.json` |
+| Settings | web page served on `http://127.0.0.1:47111` — reachable **only from this machine** (no other LAN user can open it, so no password is needed), saved to `config.json` |
 
 ## Setup
 
@@ -43,6 +43,9 @@ stores absolute paths, so a copy works from anywhere.
 - **Right-click the tray icon** → menu: Open settings / Pause listening / Resume
   listening / Test microphone / Quit. "Open settings" opens the settings page in
   your browser (this machine only) — press "Done" in the page to close it.
+- While the app is running, you can also open the settings page directly in your
+  browser at `http://127.0.0.1:47111` (typing `127.0.0.1` **without** that port
+  hits port 80, not the app — that shows "didn't send any data").
 - To open just the settings page: `python app.py --settings`
 - Status colors: gray = idle, **red = listening to you**, amber = transcribing,
   back to gray when the text was inserted.

@@ -144,7 +144,7 @@ textarea.ce{min-width:220px;white-space:pre-wrap;}
 <body>
 <script>window.__INIT__ = __INIT_JSON__;</script>
 <h1>Voice Dictation settings</h1>
-<div class="note">This page is served only to this machine (127.0.0.1, random port) - nobody
+<div class="note">This page is served only to this machine (127.0.0.1) - nobody
 on your network can open it, so no password is needed. Settings are saved to
 <code>config.json</code> in the app folder; the running app uses them right away.</div>
 <div id="msg">Ready. Edit anything below, then press "Save settings". Press
@@ -343,6 +343,11 @@ document.getElementById('btn-close').onclick = function () {
 </html>
 """
 
+# Fixed local port so the page can be typed into a browser while the app runs
+# (127.0.0.1 keeps it unreachable from other machines). Falls back to a random
+# port if something else already holds this one (e.g. two app instances).
+PREFERRED_PORT = 47111
+
 LIVE_CFG = None
 _DONE = {}
 
@@ -451,8 +456,8 @@ def open_settings(cfg):
     global LIVE_CFG
     LIVE_CFG = cfg
     srv = None
-    for _attempt in range(6):
-        port = random.randint(49152, 65535)
+    ports = [PREFERRED_PORT] + [random.randint(49152, 65535) for _ in range(6)]
+    for port in ports:
         try:
             srv = HTTPServer(("127.0.0.1", port), Handler)
             break
