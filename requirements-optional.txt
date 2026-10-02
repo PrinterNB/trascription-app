@@ -2,4 +2,6 @@
 transformers>=4.51
 torch
 torchaudio
+# transformers feature extraction for the Canary/Parakeet models needs librosa
+librosa
 

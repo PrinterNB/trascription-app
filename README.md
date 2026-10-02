@@ -66,7 +66,9 @@ stores absolute paths, so a copy works from anywhere.
 
 1. Mouse-click into the textbox you want to dictate into (Word, an email draft,
    any app) so it has keyboard focus.
-2. Press and **hold** your trigger key (default F9) and talk.
+2. Press and **hold** your trigger key (default F9) and talk — listening starts
+   the instant you press: capture runs continuously, so the moment the key
+   registers, audio is already rolling and your first words are caught.
 3. **Release** it. The text — with your voice shortcuts already replaced — is
    typed into that window.
 
@@ -114,9 +116,11 @@ the tab — the page stays available for the whole time the app runs.
     `tiny`, `base`, `small`, `medium`, `large-v3`, `large-v3-turbo`
     (accuracy vs speed/RAM; `base` is a good start, `small` is noticeably
     better).
-  - `NVIDIA Canary` — multilingual; shows Canary presets: 180M Flash (EN/ES,
-    fastest), 1B v2 (25 languages), **Canary Qwen 2.5B** (best quality, but
-    heavy on CPU — several GB of RAM, slow).
+  - `NVIDIA Canary` — multilingual; shows the Canary presets that Hugging Face
+    mirrors with a transformers-native config (1B v2, 25 languages). NVIDIA repos
+    that publish only a NeMo checkpoint (`.nemo`) — Canary 180M Flash, Canary
+    Qwen 2.5B, plain Canary 1B — cannot be loaded by transformers and are not
+    offered.
   - `NVIDIA Parakeet` — very accurate English ASR (TDT 0.6B v3 also covers
     26 languages); shows Parakeet presets. CPU-friendly.
   - `Custom model` — shows a free-text field for any Hugging Face ASR model ID.
@@ -160,7 +164,9 @@ Models are downloaded once from Hugging Face/CT2 on first use and cached
 - Errors are appended to `errors.log` next to this README.
 - `config.json` is plain text — it stores your email/card number; keep the folder
   private.
-- Canary Qwen 2.5B and `large-v3` need a lot of RAM; stay on `base`/`small` or
+- Canary 1B v2 and `large-v3` need a lot of RAM; stay on `base`/`small` or
   the smaller models if your machine is modest.
+- The Canary/Parakeet engines need `librosa` (listed in `requirements-optional.txt`);
+  without it transformers raises "ParakeetFeatureExtractor requires the librosa library".
 - Parakeet CTC/RNNT presets are English-only; use TDT 0.6B v3 or Whisper for
   other languages.

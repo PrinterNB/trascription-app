@@ -102,7 +102,7 @@ def _ffmpeg_chunk(name, seconds):
 
     `-t` is an INPUT option (before -i): with no cap the DirectShow source
     closes after ~0.1s on Windows capture filters, so every capture is capped
-    and repeated by _ffmpeg_until_key_up."""
+    and repeated by _dshow_key_held."""
     ff = _ffmpeg_path()
     if not ff:
         return numpy.zeros(0, dtype=numpy.int16)
@@ -119,30 +119,42 @@ def _ffmpeg_chunk(name, seconds):
     return numpy.frombuffer(p.stdout, dtype=numpy.int16)
 
 
-def _ffmpeg_until_key_up(name, is_key_up, timeout, chunk=0.5):
-    """Accumulate capped DirectShow captures until `is_key_up()` says released.
+def _dshow_key_held(name, is_key_held, timeout, chunk=0.5, on_start=None):
+    """Capture continuously and keep only the audio while the key is held.
+
+    Chunks are captured whether or not the key is down, so the stream is
+    already rolling when the key goes down: the chunk that contains the press
+    is kept, which means listening starts the instant the key is pressed.
 
     A single dshow stream EOFs after ~0.1s, so continuous capture is a loop of
     short ffmpeg runs; the key check between chunks is what honors
-    'listen only while I'm holding the key' (release caught within ~0.5s)."""
+    'listen only while I'm holding the key' (release caught within ~chunk).
+    Returns (audio, duration_seconds, key_was_held)."""
     parts = []
     total = 0
+    started = False
     t0 = time.time()
     while True:
-        if is_key_up():
-            break
         left = timeout - (time.time() - t0)
         if left <= 0:
             break
         raw = _ffmpeg_chunk(name, min(chunk, left))
-        if raw.size == 0:
+        if is_key_held():
+            if raw.size == 0:
+                # key held but the source yielded nothing: dead mic
+                return numpy.zeros(0, dtype=numpy.float32), 0.0, True
+            if not started:
+                started = True
+                if on_start:
+                    on_start()
+            parts.append(raw)
+            total += raw.size
+        elif started:
             break
-        parts.append(raw)
-        total += raw.size
     if not parts:
-        return numpy.zeros(0, dtype=numpy.float32), 0.0
+        return numpy.zeros(0, dtype=numpy.float32), 0.0, started
     cat = numpy.concatenate(parts)
-    return cat.astype(numpy.float32) / 32768.0, total / float(SAMPLERATE)
+    return cat.astype(numpy.float32) / 32768.0, total / float(SAMPLERATE), started
 
 
 def _sd_fixed(seconds, samplerate, dev):
@@ -159,26 +171,44 @@ def _sd_fixed(seconds, samplerate, dev):
     return _to_float(frames)
 
 
-def _sd_until_key_up(is_key_up, timeout, dev):
+def _sd_key_held(is_key_held, timeout, dev, on_start=None):
+    """PortAudio twin of _dshow_key_held: the input stream runs at all times so
+    listening starts the instant the key is pressed; frames captured before the
+    press are dropped. Returns (audio, duration_seconds, key_was_held)."""
     frames = []
 
     def collect(data, _frames, _t, _status):
         frames.append(numpy.frombuffer(data, dtype=numpy.int16))
 
+    started = False
     t0 = time.time()
+    t_press = None
     duration = 0.0
     with sounddevice.RawInputStream(
         samplerate=SAMPLERATE, blocksize=1600, device=dev,
         dtype="int16", channels=1, callback=collect,
     ):
-        while not is_key_up():
+        while True:
+            if is_key_held():
+                if not started:
+                    started = True
+                    t_press = time.time()
+                    if on_start:
+                        on_start()
+                duration = time.time() - t_press
+            elif started:
+                break
+            else:
+                del frames[:]  # idle: drop anything heard before the press
+            time.sleep(0.05)
             if time.time() - t0 > timeout:
                 break
-            duration = time.time() - t0
         deadline = time.time() + 0.25
         while time.time() < deadline:
             time.sleep(0.01)
-    return _to_float(frames), duration
+    if not started:
+        return numpy.zeros(0, dtype=numpy.float32), 0.0, False
+    return _to_float(frames), duration, started
 
 
 def record_fixed(seconds, samplerate=SAMPLERATE, device=None):
@@ -189,11 +219,16 @@ def record_fixed(seconds, samplerate=SAMPLERATE, device=None):
     return _sd_fixed(seconds, samplerate, val)
 
 
-def record_until_key_up(is_key_up, timeout=600, device=None):
+def record_key_held(is_key_held, timeout=600, device=None, on_start=None):
+    """Capture continuously; keep audio only while `is_key_held()` is true.
+
+    Capture runs ahead of the press, so listening begins the moment the key
+    goes down. `on_start` is called once when the key first registers.
+    Returns (audio, duration_seconds, key_was_held)."""
     mode, val = _resolve(device)
     if mode == "dshow":
-        return _ffmpeg_until_key_up(val, is_key_up, timeout)
-    return _sd_until_key_up(is_key_up, timeout, val)
+        return _dshow_key_held(val, is_key_held, timeout, on_start=on_start)
+    return _sd_key_held(is_key_held, timeout, val, on_start)
 
 
 def _to_float(frames):

@@ -163,9 +163,10 @@ WHISPER_SIZE_LABELS = {
 }
 
 CANARY_MODELS = [
-    ("nvidia/canary-180m-flash", "Canary 180M Flash - English/Spanish, fastest"),
+    # Only models with an HF-native config (a `model_type`) load through
+    # transformers. canary-180m-flash and canary-qwen-2.5b ship only .nemo
+    # checkpoints and can never load here, so they are not offered.
     ("nvidia/canary-1b-v2", "Canary 1B v2 - 25 languages"),
-    ("nvidia/canary-qwen-2.5b", "Canary Qwen 2.5B - best quality, heavy (several GB RAM)"),
 ]
 PARAKEET_MODELS = [
     ("nvidia/parakeet-tdt-0.6b-v3", "Parakeet TDT 0.6B v3 - 26 languages"),
@@ -247,10 +248,19 @@ def _norm_cfg(raw):
         except (TypeError, ValueError):
             di = -1
         cfg["input_device"] = ("sd:%d" % di) if di >= 0 else ""
-    if not cfg.get("hf_model"):
-        cfg["hf_model"] = config_mod.DEFAULTS["hf_model"]
     if cfg.get("engine") not in ENGINE_ORDER:
         cfg["engine"] = "whisper"
+    hf = str(cfg.get("hf_model") or "")
+    engine_presets = {
+        "canary": [r for r, _l in CANARY_MODELS],
+        "parakeet": [r for r, _l in PARAKEET_MODELS],
+    }
+    if cfg.get("engine") in engine_presets and hf not in engine_presets[cfg["engine"]]:
+        hf = ""  # preset that went unsupported -> fall back to the engine default
+    if not hf:
+        engine_presets.setdefault(cfg["engine"], [config_mod.DEFAULTS["hf_model"]])
+        hf = engine_presets[cfg["engine"]][0]
+    cfg["hf_model"] = hf
     if cfg.get("output_mode") not in ("autotype", "clipboard"):
         cfg["output_mode"] = "autotype"
     if cfg.get("whisper_model") not in WHISPER_SIZES:
@@ -357,7 +367,7 @@ tr[data-installed]{background:#10202c;}
 """
 
 SETTINGS_PAGE = r"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device=device,initial-scale=1">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Voice Dictation settings</title><style>__THEME__</style></head>
 <body>
 <script>window.__INIT__ = __INIT_JSON__;</script>
@@ -567,7 +577,7 @@ document.getElementById('btn-models').onclick = function () {
 """
 
 MODELS_PAGE = r"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device=device,initial-scale=1">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Models - Voice Dictation</title><style>__THEME__
 .modelbar{margin:0 0 8px;}
 #busy{margin:10px 0;padding:8px 12px;background:#16202e;border:1px solid #2b3a52;border-radius:10px;font-weight:600;}
@@ -840,7 +850,9 @@ def _model_download(repo):
     except Exception:
         return {"error": "huggingface_hub not available; set this model active and run a test instead"}
     try:
-        snapshot_download(repo_id=repo)
+        # skip .nemo checkpoint duplicates: the runtime loads only the HF-native
+        # files, and the .nemo blobs are the same weights again.
+        snapshot_download(repo_id=repo, allow_patterns=["*.safetensors", "*.json", "*.model", "*.txt", "*.bin"])
         return {"ok": True}
     except Exception as e:
         return {"error": str(e)}

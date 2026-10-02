@@ -45,6 +45,10 @@ def _whisper(audio, size, language, gpu=False):
 
 
 def _hf_transformers(audio, model_id, gpu=False):
+    """Canary / Parakeet / custom HF models through the transformers ASR
+    pipeline. The model must have an HF-native config (model_type); repos that
+    ship only a NeMo checkpoint (.nemo) cannot be loaded this way - the preset
+    list avoids those, and this raises a clear message for anything else."""
     key = ("hf", model_id, gpu)
     pipe = _CACHE.get(key)
     if pipe is None:
@@ -52,25 +56,15 @@ def _hf_transformers(audio, model_id, gpu=False):
         import torch
 
         torch.set_num_threads(_threads())
+        dev = 0 if gpu and torch.cuda.is_available() else -1
         try:
-            pipe = pipeline(
-                "automatic-speech-recognition",
-                model=model_id,
-                trust_remote_code=True,
-                device=0 if gpu else -1,
+            pipe = pipeline("automatic-speech-recognition", model=model_id, device=dev)
+        except Exception as e:
+            raise OSError(
+                "%s cannot be loaded as a transformers ASR model: %s "
+                "(models that only ship a .nemo checkpoint are not supported here)" % (model_id, e)
             )
-        except Exception:
-            # Some model families are not registered for the ASR pipeline; use their
-            # custom transformers classes directly.
-            if gpu:
-                import torch as _t
-
-                if not _t.cuda.is_available():
-                    pipe = _manual_hf(model_id)
-                    _CACHE[("hf", model_id, False)] = pipe
-                    return _run_hf(pipe, audio)
-            pipe = _manual_hf(model_id)
-        _CACHE[key] = pipe
+        _CACHE[("hf", model_id, dev == 0)] = pipe
     return _run_hf(pipe, audio)
 
 
@@ -79,25 +73,3 @@ def _run_hf(pipe, audio):
     return (out["text"] if isinstance(out, dict) else out).strip()
 
 
-def _manual_hf(model_id):
-    from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
-
-    def _call(audio):
-        model = AutoModelForSpeechSeq2Seq.from_pretrained(model_id, trust_remote_code=True)
-        processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-
-        def run(audio):
-            inputs = processor({"raw": audio, "sampling_rate": 16000}, return_tensors="pt")
-            generated = model.generate(**inputs)
-            try:
-                return processor.batch_decode(generated, skip_special_tokens=True)[0]
-            except Exception:
-                return processor.batch_decode(
-                    generated,
-                    target_len=generated.shape[-1],
-                    skip_special_tokens=True,
-                )[0]
-
-        return run
-
-    return _call

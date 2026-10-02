@@ -8,7 +8,7 @@ DEFAULTS = {
     "output_mode": "autotype",
     "engine": "whisper",
     "whisper_model": "base",
-    "hf_model": "nvidia/canary-180m-flash",
+    "hf_model": "nvidia/canary-1b-v2",
     "language": None,
     "commands": [],
     # Microphone source: "" = auto-pick, "ds:<name>" = Windows/DirectShow source

@@ -141,10 +141,15 @@ def hotkey_loop():
                 time.sleep(0.3)
                 continue
             key = CFG.get("trigger_key", "f9")
-            while not key_down(key):
-                time.sleep(0.03)
-            set_status("recording")
-            audio, duration = recorder.record_until_key_up(lambda: not key_down(key), device=mic_device())
+            set_status("waiting for the trigger key...")
+            audio, duration, held = recorder.record_key_held(
+                lambda: key_down(key), device=mic_device(),
+                on_start=lambda: set_status("recording"),
+            )
+            if not held:
+                # key never pressed (idle timeout): normal, not an error
+                set_status("idle")
+                continue
             if len(audio) == 0:
                 note("the selected microphone returned no audio - pick another source in the settings UI")
                 set_status("idle")
