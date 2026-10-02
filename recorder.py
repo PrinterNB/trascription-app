@@ -98,11 +98,12 @@ def _resolve(device):
 
 
 def _ffmpeg_chunk(name, seconds):
-    """Capture `seconds` seconds of raw PCM from a DirectShow source.
-
-    `-t` is an INPUT option (before -i): with no cap the DirectShow source
-    closes after ~0.1s on Windows capture filters, so every capture is capped
-    and repeated by _dshow_key_held."""
+    """One capped DirectShow read. `-t` is an INPUT option (before -i): with no
+    cap the DirectShow source closes after ~0.1s on Windows capture filters, so
+    every one-shot capture is capped. Multiple input copies in one process do
+    NOT work here (the second copy gets no data), so hold-to-talk capture uses
+    _dshow_key_held instead: one long capped stream per span, read in pieces.
+    A single capped stream with one input does stream continuously to 30s+."""
     ff = _ffmpeg_path()
     if not ff:
         return numpy.zeros(0, dtype=numpy.int16)
@@ -122,13 +123,16 @@ def _ffmpeg_chunk(name, seconds):
 def _dshow_key_held(name, is_key_held, timeout, chunk=0.5, on_start=None, idle_wait=5.0):
     """Capture continuously and keep only the audio while the key is held.
 
-    Chunks are captured whether or not the key is down, so the stream is
-    already rolling when the key goes down: the chunk that contains the press
-    is kept, which means listening starts the instant the key is pressed.
+    The stream runs whether or not the key is down, so it is already rolling
+    when the key goes down: the piece that contains the press is kept, which
+    means listening starts the instant the key is pressed.
 
-    A single dshow stream EOFs after ~0.1s, so continuous capture is a loop of
-    short ffmpeg runs; the key check between chunks is what honors
-    'listen only while I'm holding the key' (release caught within ~chunk).
+    Capture is ONE long capped dshow stream per 30s span (one capped input
+    streams continuously; an uncapped one EOFs after ~0.1s, and multiple input
+    copies in one process get no data). stdout is read in `chunk`-sized pieces
+    and the key is checked between pieces, so release is caught within ~chunk
+    and the stream is terminated the moment the key comes up. One startup per
+    span keeps ~95% of real time instead of ~23% for one spawn per chunk.
 
     `timeout` caps one dictation once the key registers; `idle_wait` caps the
     wait for a press - after that we return held=False so the caller can
@@ -140,29 +144,64 @@ def _dshow_key_held(name, is_key_held, timeout, chunk=0.5, on_start=None, idle_w
     started = False
     t0 = time.time()
     t_press = t0
-    while True:
+    read_bytes = int(chunk * SAMPLERATE) * 2
+    span = 30.0
+    dead_spans = 0
+    stop = False
+    ff = _ffmpeg_path()
+    if not ff:
+        return numpy.zeros(0, dtype=numpy.float32), 0.0, False
+    while not stop:
         now = time.time()
         if not started and now - t0 > idle_wait:
             break
         if started and now - t_press > timeout:
             break
-        limit = (idle_wait if not started else timeout) - (now - (t0 if not started else t_press))
-        if limit <= 0:
+        args = [ff, "-hide_banner", "-y", "-t", repr(span),
+                "-f", "dshow", "-i", f"audio={name}",
+                "-vn", "-ac", "1", "-ar", str(SAMPLERATE),
+                "-acodec", "pcm_s16le", "-f", "s16le", "pipe:1"]
+        try:
+            proc = subprocess.Popen(args, stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL,
+                                    stdin=subprocess.DEVNULL,
+                                    creationflags=NO_CONSOLE)
+        except Exception:
             break
-        raw = _ffmpeg_chunk(name, min(chunk, limit))
-        if is_key_held():
-            if raw.size == 0:
-                # key held but the source yielded nothing: dead mic
-                return numpy.zeros(0, dtype=numpy.float32), 0.0, True
-            if not started:
-                started = True
-                t_press = now
-                if on_start:
-                    on_start()
-            parts.append(raw)
-            total += raw.size
-        elif started:
-            break
+        span_bytes = 0
+        try:
+            while True:
+                data = proc.stdout.read(read_bytes)
+                if not data:
+                    break  # this span's stream ended; re-spawn if still going
+                span_bytes += len(data)
+                raw = numpy.frombuffer(data, dtype=numpy.int16)
+                if is_key_held():
+                    if not started:
+                        started = True
+                        t_press = time.time()
+                        if on_start:
+                            on_start()
+                    parts.append(raw)
+                    total += raw.size
+                elif started:
+                    proc.terminate()  # key released: cut the long stream short
+                    stop = True
+                    break
+                if started and time.time() - t_press > timeout:
+                    proc.terminate()
+                    stop = True
+                    break
+                if not started and time.time() - t0 > idle_wait:
+                    proc.terminate()
+                    stop = True
+                    break
+        except Exception:
+            stop = True
+        if span_bytes == 0:
+            dead_spans += 1
+            if dead_spans >= 2:
+                break  # source produced nothing twice: stop, caller reports it
     if not parts:
         return numpy.zeros(0, dtype=numpy.float32), 0.0, started
     cat = numpy.concatenate(parts)
