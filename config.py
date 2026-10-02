@@ -23,12 +23,18 @@ DEFAULTS = {
 def load():
     cfg = dict(DEFAULTS)
     if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            stored = json.load(f)
-        cfg.update(stored)
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                stored = json.load(f)
+            if isinstance(stored, dict):
+                cfg.update(stored)
+        except (OSError, ValueError, TypeError):
+            pass  # corrupt config.json must not brick the app -> defaults
     return cfg
 
 
 def save(cfg):
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+    tmp = CONFIG_PATH + ".tmp"  # same directory, so os.replace is atomic
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, CONFIG_PATH)

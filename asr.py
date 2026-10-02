@@ -1,5 +1,7 @@
 import os
 
+import config as config_mod
+
 _CACHE = {}
 
 
@@ -13,7 +15,7 @@ def transcribe(audio, cfg):
     gpu = bool(cfg.get("gpu", False))
     if cfg.get("engine", "whisper") == "whisper":
         return _whisper(audio, cfg.get("whisper_model", "base"), cfg.get("language"), gpu)
-    model_id = cfg.get("hf_model") or "nvidia/canary-180m-flash"
+    model_id = cfg.get("hf_model") or config_mod.DEFAULTS["hf_model"]
     return _hf_transformers(audio, model_id, gpu)
 
 
