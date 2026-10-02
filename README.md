@@ -144,9 +144,12 @@ CUDA (`int8_float16`) when the ctranslate2 build has CUDA; without a GPU it fall
 back to CPU and says so.
 
 A separate **Models** page lives at `http://127.0.0.1:47111/models.html`: it lists every
-model (Whisper sizes, Canary, Parakeet presets) plus anything else physically present in
-the HF cache, with installed/present status and size, and lets you **Download** (pre-fetch
-a model, needs internet once) or **Delete** it. Models already present are used offline.
+model (Whisper sizes, Canary, Parakeet presets, **plus every other Canary model NVIDIA
+publishes**, flagged "NeMo checkpoint only - this app cannot load it": those ship only
+`.nemo` checkpoints and are not selectable in the settings dropdown) plus anything else
+physically present in the HF cache, with installed/present status and size, and lets you
+**Download** (pre-fetch a model, needs internet once) or **Delete** it. Models already
+present are used offline.
 
 Models are downloaded once from Hugging Face/CT2 on first use and cached
 (`~/.cache`). After that, inference is fully offline.

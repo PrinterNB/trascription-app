@@ -174,6 +174,15 @@ PARAKEET_MODELS = [
     ("nvidia/parakeet-rnnt-1.1b", "Parakeet RNNT 1.1B - English"),
 ]
 
+# Models shown on the Models page for completeness but NOT offered in the
+# settings dropdown: NVIDIA publishes these only as NeMo (.nemo) checkpoints,
+# which transformers cannot load.
+UNLOADABLE_MODELS = [
+    ("canary", "Canary 180M Flash", "nvidia/canary-180m-flash"),
+    ("canary", "Canary 1B", "nvidia/canary-1b"),
+    ("canary", "Canary Qwen 2.5B", "nvidia/canary-qwen-2.5b"),
+]
+
 LANGUAGES = [
     ("", "(auto-detect)"),
     ("en", "English"),
@@ -623,7 +632,8 @@ function paint() {
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
     var tr = table.appendChild(document.createElement('tr'));
-    var c0 = tr.appendChild(document.createElement('td')); c0.textContent = r.label;
+    var c0 = tr.appendChild(document.createElement('td'));
+    c0.textContent = r.label + (r.note ? ' - ' + r.note : '');
     var c1 = tr.appendChild(document.createElement('td')); c1.textContent = r.engine;
     var c2 = tr.appendChild(document.createElement('td'));
     c2.textContent = r.installed ? 'present' : 'not downloaded';
@@ -641,10 +651,12 @@ function rowActions(cell, r) {
     var delBtn = cell.appendChild(document.createElement('button')); delBtn.className = 'small';
     delBtn.textContent = 'Delete';
     delBtn.onclick = function () { act(r, 'delete'); };
-    var reBtn = cell.appendChild(document.createElement('button')); reBtn.className = 'small';
-    reBtn.textContent = 'Re-download';
-    reBtn.onclick = function () { act(r, 'download'); };
-  } else {
+    if (!r.note) {
+      var reBtn = cell.appendChild(document.createElement('button')); reBtn.className = 'small';
+      reBtn.textContent = 'Re-download';
+      reBtn.onclick = function () { act(r, 'download'); };
+    }
+  } else if (!r.note) {
     var dlBtn = cell.appendChild(document.createElement('button')); dlBtn.className = 'small';
     dlBtn.textContent = 'Download';
     dlBtn.onclick = function () { act(r, 'download'); };
@@ -795,13 +807,14 @@ def _models_listing():
     rows = []
     seen = set()
 
-    def add(engine, label, repo):
+    def add(engine, label, repo, note=""):
         r = str(repo)
         rows.append(
             {
                 "label": label,
                 "engine": engine,
                 "repo": r,
+                "note": note,
                 "installed": r in present,
                 "size": _fmt_bytes(present[r]) if r in present else "",
             }
@@ -814,6 +827,12 @@ def _models_listing():
         add("canary", label, repo)
     for repo, label in PARAKEET_MODELS:
         add("parakeet", label, repo)
+    # Every other Canary model NVIDIA publishes, flagged honestly: these ship
+    # only NeMo (.nemo) checkpoints, which transformers cannot load, so they
+    # stay out of the settings dropdown and cannot be downloaded here.
+    nemo_note = "NeMo checkpoint only - this app cannot load it"
+    for engine, label, repo in UNLOADABLE_MODELS:
+        add(engine, label, repo, note=nemo_note)
 
     # Anything physically present that is not one of the presets above.
     for repo, _b in sorted(present.items()):
