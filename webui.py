@@ -183,6 +183,23 @@ UNLOADABLE_MODELS = [
     ("canary", "Canary Qwen 2.5B", "nvidia/canary-qwen-2.5b"),
 ]
 
+# One-to-two-line explanation for each model, shown on the Models page.
+MODEL_BIO = {
+    "Systran/faster-whisper-tiny": "OpenAI Whisper family: speech-to-text transducer, run here with CTranslate2 (fast, all CPU cores). Tiny: smallest and fastest, least accurate.",
+    "Systran/faster-whisper-base": "OpenAI Whisper: good default balance of speed and accuracy.",
+    "Systran/faster-whisper-small": "OpenAI Whisper: noticeably better accuracy than base, still quick on this machine.",
+    "Systran/faster-whisper-medium": "OpenAI Whisper: higher accuracy, slower; a step before large.",
+    "Systran/faster-whisper-large-v3": "OpenAI Whisper large-v3: best Whisper accuracy, ~3 GB, multilingual.",
+    "Systran/faster-whisper-large-v3-turbo": "OpenAI Whisper large-v3-turbo: large-tier accuracy with a smaller decoder - much faster than large-v3.",
+    "nvidia/canary-1b-v2": "NVIDIA Canary 1B v2: fast multilingual speech-to-text covering 25 languages; tuned for natural conversational speech.",
+    "nvidia/parakeet-tdt-0.6b-v3": "NVIDIA Parakeet TDT 0.6B v3: highly accurate English ASR that also covers 26 languages; TDT (token-and-duration transducer) decodes quickly.",
+    "nvidia/parakeet-ctc-1.1b": "NVIDIA Parakeet CTC 1.1B: English-only model using CTC decoding - simple and fast, but less punctuation-friendly than TDT.",
+    "nvidia/parakeet-rnnt-1.1b": "NVIDIA Parakeet RNNT 1.1B: English-only RNN transducer; more accurate than CTC, slower.",
+    "nvidia/canary-180m-flash": "NVIDIA Canary 180M Flash: very fast English/Spanish fast-audio model.",
+    "nvidia/canary-1b": "NVIDIA Canary 1B (first release): multilingual speech-to-text; v2 is the current version.",
+    "nvidia/canary-qwen-2.5b": "NVIDIA Canary Qwen 2.5B: Canary audio encoder paired with a Qwen2.5-LLM decoder - best transcript quality of the Canary line, heaviest to run.",
+}
+
 LANGUAGES = [
     ("", "(auto-detect)"),
     ("en", "English"),
@@ -595,6 +612,7 @@ thead{background:#16202e;}
 button.small{padding:3px 9px;font-size:.76rem;}
 .modelbar button,button.small{background:#253041;border:1px solid #3a4a66;border-radius:8px;}
 .modelbar button:hover,button.small:hover{background:#2e3c52;}
+.bio{font-size:.74rem;color:#98add0;}
 </style></head>
 <body>
 <h1>Local models</h1>
@@ -634,6 +652,11 @@ function paint() {
     var tr = table.appendChild(document.createElement('tr'));
     var c0 = tr.appendChild(document.createElement('td'));
     c0.textContent = r.label + (r.note ? ' - ' + r.note : '');
+    if (r.bio) {
+      var bd = c0.appendChild(document.createElement('div'));
+      bd.className = 'bio';
+      bd.textContent = r.bio;
+    }
     var c1 = tr.appendChild(document.createElement('td')); c1.textContent = r.engine;
     var c2 = tr.appendChild(document.createElement('td'));
     c2.textContent = r.installed ? 'present' : 'not downloaded';
@@ -815,6 +838,7 @@ def _models_listing():
                 "engine": engine,
                 "repo": r,
                 "note": note,
+                "bio": MODEL_BIO.get(r, ""),
                 "installed": r in present,
                 "size": _fmt_bytes(present[r]) if r in present else "",
             }
