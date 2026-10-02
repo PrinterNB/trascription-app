@@ -31,12 +31,13 @@ import asr
 
 KEY_VK = {f"f{i}": 0x70 + i - 1 for i in range(1, 13)}
 KEY_VK.update({"ctrl": 0x11, "alt": 0x12, "shift": 0x10})
-KEY_VK.update({"win": 0xA0, "lwin": 0xA0, "rwin": 0xA1})
+# Win keys are VK_LWIN/VK_RWIN (0xDB/0xDC) - Windows reuses the [ and \ codes.
+KEY_VK.update({"win": 0xDB, "lwin": 0xDB, "rwin": 0xDC})
 # Named keys so combinations can include them (e.g. "ctrl+space", "f9+space").
 NAMED_KEYS = {
     "space": 0x20, "tab": 0x09, "enter": 0x0D, "esc": 0x1B, "backspace": 0x08,
     "minus": 0xBD, "equal": 0xBB, "comma": 0xBC, "period": 0xBE, "slash": 0xBF,
-    "semic": 0xBA, "quote": 0xDB, "grave": 0xC0, "backslash": 0xDC,
+    "semic": 0xBA, "quote": 0xDE, "grave": 0xC0, "backslash": 0xDC,
 }
 KEY_VK.update(NAMED_KEYS)
 for _c in range(ord("a"), ord("z") + 1):
@@ -96,10 +97,11 @@ def _key_held(name):
 
 def _detect_order():
     """Canonical list of key tokens to watch, one per unique virtual key code,
-    ordered modifiers -> F-keys -> letters -> digits, so a detected combination
-    reads like 'Ctrl + Alt + F9'."""
+    ordered modifiers -> F-keys -> named keys -> letters -> digits, so a detected
+    combination reads like 'Ctrl + Alt + F9'. The named keys come from NAMED_KEYS
+    so every combination the settings page offers can also be detected."""
     order = _MODS + [f"f{i}" for i in range(1, 13)]
-    order += ["space", "tab", "enter", "esc", "backspace"]
+    order += _NAMED
     order += [chr(c) for c in range(ord("a"), ord("z") + 1)]
     order += [str(d) for d in range(10)]
     seen = set()
@@ -259,7 +261,10 @@ def _norm_cfg(raw):
     else:
         cfg["gpu"] = bool(cfg.get("gpu", False))
     cfg.pop("compute", None)
-    if not cfg.get("language"):
+    # Only a code we actually offer survives. The page's "(auto-detect)" option
+    # has an empty <option value>, so clicking it hands back its label text - that
+    # must never reach asr as a language code. "" means no preference -> None.
+    if not cfg.get("language") or cfg.get("language") not in {c for c, _l in LANGUAGES}:
         cfg["language"] = None
     if not _valid_trigger(cfg.get("trigger_key")):
         cfg["trigger_key"] = "f9"
@@ -403,7 +408,7 @@ Settings save to <code>config.json</code>; the running app uses them right away.
 <div id="msg">Ready. Edit anything below, then press "Save settings". Close this tab when
 you are done - the page stays available while the app runs. The tray icon turns
 <b>red</b> while recording and <b>amber</b> while processing.</div>
-<div id="status">Live status: waiting for the trigger key...</div>
+<div id="status">Live status: <span>waiting for the trigger key...</span></div>
 <form id="f"></form>
 <div class="btns">
 <button id="btn-detect">Detect my key</button>
@@ -569,7 +574,8 @@ document.getElementById('btn-detect').onclick = function () {
   post('/detect-key', { timeout: 12 }, function (j) {
     if (j.key) {
       st.trigger_key = j.key;
-      if (j.key.indexOf('+') >= 0) { try { selKey.value = selKey.options[0].value; } catch (e1) {}
+      if (j.key.indexOf('+') >= 0) { try { for (var oi = 0; oi < selKey.options.length; oi++) {
+          if (selKey.options[oi].value === j.key) { selKey.value = j.key; break; } } } catch (e1) {}
         if (customKeyEd) customKeyEd.textContent = j.key; }
       else { try { selKey.value = j.key; } catch (e2) {} }
       setMsg('Detected "' + keyLabel(j.key) + '" (any number of keys). Press "Save settings" to use it.');
@@ -756,15 +762,21 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             body = {}
         if self.path == "/save":
-            cfg = _norm_cfg(body.get("cfg"))
-            live = dict(LIVE_CFG) if LIVE_CFG is not None else config_mod.load()
-            live.update(cfg)
-            cfg = _norm_cfg(live)
-            config_mod.save(cfg)
-            if LIVE_CFG is not None:
-                LIVE_CFG.clear()
-                LIVE_CFG.update(cfg)
-            self._send_json({"ok": True})
+            try:
+                cfg = _norm_cfg(body.get("cfg"))
+                live = dict(LIVE_CFG) if LIVE_CFG is not None else config_mod.load()
+                live.update(cfg)
+                cfg = _norm_cfg(live)
+                config_mod.save(cfg)
+                if LIVE_CFG is not None:
+                    # app.py aliases this very dict as its CFG, so keep the object
+                    # and never empty it: one atomic update, then drop stale keys.
+                    LIVE_CFG.update(cfg)
+                    for _gone in [k for k in LIVE_CFG if k not in cfg]:
+                        del LIVE_CFG[_gone]
+                self._send_json({"ok": True})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)})
         elif self.path == "/detect-key":
             try:
                 timeout = min(max(float(body.get("timeout") or 10), 1), 30)
@@ -957,15 +969,24 @@ def open_models_in_browser():
 
 
 def open_settings_standalone(cfg):
-    """Debug entry: run just the settings server + browser; Ctrl+Q to exit."""
+    """Debug entry: run just the settings server + browser; Ctrl+C to exit."""
     global LIVE_CFG
     LIVE_CFG = cfg
     url = start_server()
     if not url:
         return
     open_in_browser()
-    print(f"Settings page at {url}; close the tab when done, then press Ctrl+Q.")
-    threading.Event().wait()
+    print(f"Settings page at {url}; close the tab when done, then press Ctrl+C.")
+    try:
+        threading.Event().wait()
+    except KeyboardInterrupt:
+        pass
+    # let the serve thread leave, so its listening socket is closed properly
+    # (shutdown() blocks until serve_forever finishes, which it does here).
+    try:
+        SERVER.shutdown()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
