@@ -12,6 +12,7 @@ transcription is typed into that window. Say a configured shortcut phrase like
 | --- | --- |
 | Speech recognition | [faster-whisper](https://github.com/DeepInsider/faster-whisper) (OpenAI Whisper, CTranslate2, all CPU cores — plus NVIDIA Canary and NVIDIA Parakeet as alternative engines), with a CPU/GPU toggle in the tray menu |
 | Tray icon | `pystray` — the app lives in your system tray, no terminal window |
+| Screen-corner icon | while **listening** (recording) and while **transcribing**, a small icon appears in the top-right corner of your screens — red = recording, amber = transcribing — and disappears the rest of the time, so you can watch state even though Windows 11 hides tray icons |
 | Hold-to-talk | any F-key / Ctrl / Alt / Shift / letter / digit, configurable in the settings UI — or click "Detect my key" and physically press the shortcut you want (default `F9`) |
 | Microphone | Windows DirectShow sources via `ffmpeg` (the real system mic list), with `sounddevice`/PortAudio as a fallback |
 | Output | types into the focused window (Windows Script Host `SendKeys` via `cscript.exe`) or copies to the clipboard — configurable |
@@ -158,7 +159,9 @@ Models are downloaded once from Hugging Face/CT2 on first use and cached
 
 - **Tray icon missing after a few seconds** — Windows 11 hides third-party tray
   icons by default; use TopBar/Barrel/ExplorerCoreFix, or just run the app as a
-  window (`python app.py`).
+  window (`python app.py`). You can still watch the app's state without the tray
+  icon: the screen-corner icon appears in the top-right corner of your displays
+  while recording/transcribing (its color shows which).
 - **Nothing typed into your app** — output mode "type into focused window" needs
   the target window to have keyboard focus: click into it first, right next to
   where you want the text. Alternatively set output mode to clipboard and paste

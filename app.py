@@ -11,6 +11,7 @@ import config as config_mod
 import recorder
 import asr
 import trayicon
+import overlay
 import webui
 
 import tkinter
@@ -67,6 +68,7 @@ def set_status(status):
     STATUS["status"] = status
     webui.LIVE_STATUS["stage"] = status
     webui.LIVE_STATUS["ts"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    overlay.set_status(status)  # screen-corner icon (the tray is hidden on Win 11)
     if ICON:
         try:
             ICON.icon = trayicon.image_for(status)
@@ -257,6 +259,7 @@ def main():
     ICON = Icon("Voice Dictation", trayicon.image_for("idle"), _title(), MENU)
     threading.Thread(target=hotkey_loop, name="VoiceDictation", daemon=True).start()
     ICON.run()
+    overlay.close()  # tear the HUD down before returning, so Tk cannot linger
 
 
 if __name__ == "__main__":

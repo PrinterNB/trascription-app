@@ -16,6 +16,15 @@ def image_for(status="idle"):
     d = ImageDraw.Draw(img)
     d.rounded_rectangle([4, 4, SIZE - 4, SIZE - 4], radius=14, fill=color + (255,))
 
+    if status == "processing":
+        # speech bubble with three dots: your words are being composed
+        white = (245, 245, 248, 255)
+        d.rounded_rectangle([10, 8, SIZE - 10, 38], radius=8, fill=white)
+        d.polygon([(16, 37), (22, 52), (30, 37)], fill=white)
+        for cx in (22, 32, 42):
+            d.ellipse([cx - 4, 19, cx + 4, 27], fill=color + (255,))
+        return img
+
     cx, cy = SIZE // 2, 22
     d.ellipse([cx - 10, cy - 10, cx + 10, cy + 10], fill=(245, 245, 248, 255))
     d.line([cx, cy + 10, cx, 47], fill=(245, 245, 248, 255), width=4)
