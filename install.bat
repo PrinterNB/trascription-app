@@ -12,6 +12,11 @@ if errorlevel 1 (
 
 echo Creating virtual environment...
 if not exist .venv python -m venv .venv
+if errorlevel 1 (
+    echo Could not create the virtual environment.
+    pause
+    exit /b 1
+)
 call .venv\Scripts\activate.bat
 
 echo.
@@ -30,10 +35,20 @@ pip install -r requirements-optional.txt
 echo.
 echo Generating tray icon...
 python trayicon.py
+if errorlevel 1 (
+    echo Tray icon generation failed.
+    pause
+    exit /b 1
+)
 
 echo.
 echo Creating the one-click launcher (VoiceDictation.bat)...
 python make_launcher.py
+if errorlevel 1 (
+    echo Launcher generation failed.
+    pause
+    exit /b 1
+)
 
 echo.
 echo All done. A launcher file was created next to this script:

@@ -5,6 +5,8 @@ numpy
 sounddevice
 pystray
 pillow
+# Models-page "Download" (prefetch) uses huggingface_hub directly (webui.py)
+huggingface_hub
 # Note: microphone capture on Windows also uses ffmpeg (DirectShow) as a system
 # tool on PATH — not a pip package. Without it the app falls back to PortAudio
 # inputs only.

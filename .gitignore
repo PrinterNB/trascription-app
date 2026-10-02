@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 config.json
+config.json.tmp
 errors.log
 VoiceDictation.bat
 .qwen/
