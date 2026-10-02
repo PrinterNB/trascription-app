@@ -10,6 +10,10 @@ For i = 1 To Len(txt)
         out = out + "{{}"
     ElseIf ch = "}" Then
         out = out + "{}}"
+    ElseIf ch = "*" Or ch = "+" Or ch = "-" Or ch = "/" Then
+        ' WSH reads these four as commands (repeat count, Shift, Ctrl,
+        ' fraction key): brace them so dictated math like 3*2 types itself
+        out = out + "{" & ch & "}"
     Else
         out = out + ch
     End If
