@@ -161,6 +161,8 @@ Models are downloaded once from Hugging Face/CT2 on first use and cached
   where you want the text. Alternatively set output mode to clipboard and paste
   with Ctrl+Ctrl+C.
 - **Text arrives but is wrong/garbled** — switch engine/size in the settings UI.
+- **Changed the trigger key?** No restart needed — the app re-reads its settings
+  every cycle, and the new key combination takes effect within a few seconds.
 - Errors are appended to `errors.log` next to this README.
 - `config.json` is plain text — it stores your email/card number; keep the folder
   private.

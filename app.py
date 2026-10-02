@@ -145,6 +145,8 @@ def hotkey_loop():
             audio, duration, held = recorder.record_key_held(
                 lambda: key_down(key), device=mic_device(),
                 on_start=lambda: set_status("recording"),
+                idle_wait=2.0,  # short so the loop re-reads CFG: a trigger key
+                # changed on the settings page applies within a few seconds
             )
             if not held:
                 # key never pressed (idle timeout): normal, not an error

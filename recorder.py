@@ -119,7 +119,7 @@ def _ffmpeg_chunk(name, seconds):
     return numpy.frombuffer(p.stdout, dtype=numpy.int16)
 
 
-def _dshow_key_held(name, is_key_held, timeout, chunk=0.5, on_start=None):
+def _dshow_key_held(name, is_key_held, timeout, chunk=0.5, on_start=None, idle_wait=5.0):
     """Capture continuously and keep only the audio while the key is held.
 
     Chunks are captured whether or not the key is down, so the stream is
@@ -129,22 +129,34 @@ def _dshow_key_held(name, is_key_held, timeout, chunk=0.5, on_start=None):
     A single dshow stream EOFs after ~0.1s, so continuous capture is a loop of
     short ffmpeg runs; the key check between chunks is what honors
     'listen only while I'm holding the key' (release caught within ~chunk).
-    Returns (audio, duration_seconds, key_was_held)."""
+
+    `timeout` caps one dictation once the key registers; `idle_wait` caps the
+    wait for a press - after that we return held=False so the caller can
+    re-read the config (a trigger key changed on the settings page takes
+    effect within idle_wait, no app restart). Returns
+    (audio, duration_seconds, key_was_held)."""
     parts = []
     total = 0
     started = False
     t0 = time.time()
+    t_press = t0
     while True:
-        left = timeout - (time.time() - t0)
-        if left <= 0:
+        now = time.time()
+        if not started and now - t0 > idle_wait:
             break
-        raw = _ffmpeg_chunk(name, min(chunk, left))
+        if started and now - t_press > timeout:
+            break
+        limit = (idle_wait if not started else timeout) - (now - (t0 if not started else t_press))
+        if limit <= 0:
+            break
+        raw = _ffmpeg_chunk(name, min(chunk, limit))
         if is_key_held():
             if raw.size == 0:
                 # key held but the source yielded nothing: dead mic
                 return numpy.zeros(0, dtype=numpy.float32), 0.0, True
             if not started:
                 started = True
+                t_press = now
                 if on_start:
                     on_start()
             parts.append(raw)
@@ -171,10 +183,8 @@ def _sd_fixed(seconds, samplerate, dev):
     return _to_float(frames)
 
 
-def _sd_key_held(is_key_held, timeout, dev, on_start=None):
-    """PortAudio twin of _dshow_key_held: the input stream runs at all times so
-    listening starts the instant the key is pressed; frames captured before the
-    press are dropped. Returns (audio, duration_seconds, key_was_held)."""
+def _sd_key_held(is_key_held, timeout, dev, on_start=None, idle_wait=5.0):
+    """PortAudio twin of _dshow_key_held (same idle_wait/timeout split)."""
     frames = []
 
     def collect(data, _frames, _t, _status):
@@ -182,17 +192,22 @@ def _sd_key_held(is_key_held, timeout, dev, on_start=None):
 
     started = False
     t0 = time.time()
-    t_press = None
+    t_press = t0
     duration = 0.0
     with sounddevice.RawInputStream(
         samplerate=SAMPLERATE, blocksize=1600, device=dev,
         dtype="int16", channels=1, callback=collect,
     ):
         while True:
+            now = time.time()
+            if not started and now - t0 > idle_wait:
+                break
+            if started and now - t_press > timeout:
+                break
             if is_key_held():
                 if not started:
                     started = True
-                    t_press = time.time()
+                    t_press = now
                     if on_start:
                         on_start()
                 duration = time.time() - t_press
@@ -201,8 +216,6 @@ def _sd_key_held(is_key_held, timeout, dev, on_start=None):
             else:
                 del frames[:]  # idle: drop anything heard before the press
             time.sleep(0.05)
-            if time.time() - t0 > timeout:
-                break
         deadline = time.time() + 0.25
         while time.time() < deadline:
             time.sleep(0.01)
@@ -219,16 +232,19 @@ def record_fixed(seconds, samplerate=SAMPLERATE, device=None):
     return _sd_fixed(seconds, samplerate, val)
 
 
-def record_key_held(is_key_held, timeout=600, device=None, on_start=None):
+def record_key_held(is_key_held, timeout=600, device=None, on_start=None, idle_wait=5.0):
     """Capture continuously; keep audio only while `is_key_held()` is true.
 
     Capture runs ahead of the press, so listening begins the moment the key
-    goes down. `on_start` is called once when the key first registers.
-    Returns (audio, duration_seconds, key_was_held)."""
+    goes down. `idle_wait` bounds the wait for a press: when nothing was ever
+    held we return quickly so callers can re-read their config (a trigger key
+    changed on the settings page applies within idle_wait). `on_start` is
+    called once when the key first registers. Returns
+    (audio, duration_seconds, key_was_held)."""
     mode, val = _resolve(device)
     if mode == "dshow":
-        return _dshow_key_held(val, is_key_held, timeout, on_start=on_start)
-    return _sd_key_held(is_key_held, timeout, val, on_start)
+        return _dshow_key_held(val, is_key_held, timeout, on_start=on_start, idle_wait=idle_wait)
+    return _sd_key_held(is_key_held, timeout, val, on_start, idle_wait)
 
 
 def _to_float(frames):
