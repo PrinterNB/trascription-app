@@ -120,12 +120,17 @@ def _ffmpeg_chunk(name, seconds):
     return numpy.frombuffer(p.stdout, dtype=numpy.int16)
 
 
-def _dshow_key_held(name, is_key_held, timeout, chunk=0.5, on_start=None, idle_wait=5.0):
+def _dshow_key_held(name, is_key_held, timeout, chunk=0.5, on_start=None, idle_wait=5.0,
+                    release_grace=0.5):
     """Capture continuously and keep only the audio while the key is held.
 
     The stream runs whether or not the key is down, so it is already rolling
     when the key goes down: the piece that contains the press is kept, which
-    means listening starts the instant the key is pressed.
+    means listening starts the instant the key is pressed. At the other end,
+    release is NOT an immediate cut: the chunk in hand was still recording
+    while the key was down, so it is kept too, and the stream keeps running
+    `release_grace` seconds past the release - words spoken the moment the
+    key came up must survive.
 
     Capture is ONE long capped dshow stream per 30s span (one capped input
     streams continuously; an uncapped one EOFs after ~0.1s, and multiple input
@@ -142,6 +147,9 @@ def _dshow_key_held(name, is_key_held, timeout, chunk=0.5, on_start=None, idle_w
     parts = []
     total = 0
     started = False
+    released = False
+    grace_taken = 0
+    grace_target = int(release_grace * SAMPLERATE)
     t0 = time.time()
     t_press = t0
     read_bytes = int(chunk * SAMPLERATE) * 2
@@ -184,10 +192,24 @@ def _dshow_key_held(name, is_key_held, timeout, chunk=0.5, on_start=None, idle_w
                             on_start()
                     parts.append(raw)
                     total += raw.size
-                elif started:
-                    proc.terminate()  # key released: cut the long stream short
-                    stop = True
-                    break
+                elif started and not released:
+                    # Key just came up. The chunk in hand was still recording
+                    # while it was down, so keep it (dropping it used to eat
+                    # up to a chunk of the speaker's last words), then start
+                    # the grace window.
+                    released = True
+                    parts.append(raw)
+                    total += raw.size
+                elif released:
+                    want = grace_target - grace_taken
+                    take = raw[:min(want, raw.size)] if want > 0 else raw[:0]
+                    parts.append(take)
+                    total += take.size
+                    grace_taken += raw.size
+                    if grace_taken >= grace_target:
+                        proc.terminate()  # grace done: cut the long stream short
+                        stop = True
+                        break
                 if started and time.time() - t_press > timeout:
                     proc.terminate()
                     stop = True
@@ -222,7 +244,8 @@ def _sd_fixed(seconds, samplerate, dev):
     return _to_float(frames)
 
 
-def _sd_key_held(is_key_held, timeout, dev, on_start=None, idle_wait=5.0):
+def _sd_key_held(is_key_held, timeout, dev, on_start=None, idle_wait=5.0,
+                 release_grace=0.5):
     """PortAudio twin of _dshow_key_held (same idle_wait/timeout split)."""
     frames = []
 
@@ -230,6 +253,7 @@ def _sd_key_held(is_key_held, timeout, dev, on_start=None, idle_wait=5.0):
         frames.append(numpy.frombuffer(data, dtype=numpy.int16))
 
     started = False
+    t_release = None
     t0 = time.time()
     t_press = t0
     duration = 0.0
@@ -241,7 +265,7 @@ def _sd_key_held(is_key_held, timeout, dev, on_start=None, idle_wait=5.0):
             now = time.time()
             if not started and now - t0 > idle_wait:
                 break
-            if started and now - t_press > timeout:
+            if started and t_release is None and now - t_press > timeout:
                 break
             if is_key_held():
                 if not started:
@@ -251,7 +275,12 @@ def _sd_key_held(is_key_held, timeout, dev, on_start=None, idle_wait=5.0):
                         on_start()
                 duration = time.time() - t_press
             elif started:
-                break
+                # Key came up: keep the stream alive for release_grace so the
+                # words of the release moment are still collected.
+                if t_release is None:
+                    t_release = now
+                elif now - t_release > release_grace:
+                    break
             else:
                 del frames[:]  # idle: drop anything heard before the press
             time.sleep(0.05)
@@ -271,19 +300,23 @@ def record_fixed(seconds, samplerate=SAMPLERATE, device=None):
     return _sd_fixed(seconds, samplerate, val)
 
 
-def record_key_held(is_key_held, timeout=600, device=None, on_start=None, idle_wait=5.0):
+def record_key_held(is_key_held, timeout=600, device=None, on_start=None, idle_wait=5.0,
+                    release_grace=0.5):
     """Capture continuously; keep audio only while `is_key_held()` is true.
 
     Capture runs ahead of the press, so listening begins the moment the key
-    goes down. `idle_wait` bounds the wait for a press: when nothing was ever
-    held we return quickly so callers can re-read their config (a trigger key
-    changed on the settings page applies within idle_wait). `on_start` is
-    called once when the key first registers. Returns
+    goes down, and runs `release_grace` seconds past the release, so the words
+    of letting go survive. `idle_wait` bounds the wait for a press: when nothing
+    was ever held we return quickly so callers can re-read their config (a
+    trigger key changed on the settings page applies within idle_wait). `on_start`
+    is called once when the key first registers. Returns
     (audio, duration_seconds, key_was_held)."""
     mode, val = _resolve(device)
     if mode == "dshow":
-        return _dshow_key_held(val, is_key_held, timeout, on_start=on_start, idle_wait=idle_wait)
-    return _sd_key_held(is_key_held, timeout, val, on_start, idle_wait)
+        return _dshow_key_held(val, is_key_held, timeout, on_start=on_start,
+                               idle_wait=idle_wait, release_grace=release_grace)
+    return _sd_key_held(is_key_held, timeout, val, on_start, idle_wait,
+                        release_grace)
 
 
 def _to_float(frames):
