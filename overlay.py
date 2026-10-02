@@ -31,6 +31,7 @@ ICON_SIZE = 64
 
 _window = None  # (root, canvas) while an icon is shown
 _current = None
+_quitting = False  # set once close() ran: a live worker thread must not re-open
 
 
 def _corner():
@@ -85,29 +86,30 @@ def _photo_for(status):
 
 def _open(status):
     top = _corner()
-    # Asking for an x far past the right edge makes Windows/Tk slide the
-    # window back on-screen flush with that edge - which leaves its content
-    # in the top-right corner of the right-most display and pushes the
-    # window's frame strip just off the edge, where it is not drawn.
     root = tkinter.Tk()
     try:
+        # Asking for an x far past the right edge makes Windows/Tk slide the
+        # window back on-screen flush with that edge - which leaves its content
+        # in the top-right corner of the right-most display and pushes the
+        # window's frame strip just off the edge, where it is not drawn.
         root.wm_attributes("-transparentcolor", SENTINEL)
+        root.wm_geometry("%dx%d+%d+%d" % (ICON_SIZE, ICON_SIZE, 60000, top))
+        root.configure(bg=SENTINEL)
+        canvas = tkinter.Canvas(root, bg=SENTINEL, width=ICON_SIZE, height=ICON_SIZE)
+        canvas.pack()
+        canvas.create_image(0, 0, image=_photo_for(status), anchor="nw")
+        root.update_idletasks()
+        root.update()
     except Exception:
-        root.destroy()
+        root.destroy()  # every raise path after Tk() tears its window down
         raise
-    root.wm_geometry("%dx%d+%d+%d" % (ICON_SIZE, ICON_SIZE, 60000, top))
-    root.configure(bg=SENTINEL)
-    canvas = tkinter.Canvas(root, bg=SENTINEL, width=ICON_SIZE, height=ICON_SIZE)
-    canvas.pack()
-    canvas.create_image(0, 0, image=_photo_for(status), anchor="nw")
-    root.update_idletasks()
-    root.update()
     return root, canvas
 
 
 def _set_picture(status):
     """Swap the picture inside an already-open window (recording <->
     processing): no destroy/create, no flicker."""
+    global _current
     canvas = _window[1]
     canvas.delete("all")
     canvas.create_image(0, 0, image=_photo_for(status), anchor="nw")
@@ -126,8 +128,12 @@ def _close():
 def set_status(status):
     """Show the corner icon while recording/processing, hide it otherwise.
     Never raises: a display glitch must not break a dictation cycle."""
-    global _window, _current
+    global _window, _current, _quitting
     try:
+        if _quitting:
+            # main() closed the HUD on Quit; the worker thread is still running
+            # mid-cycle - it must not re-open a window nobody will tear down.
+            return
         if status in SHOW_WHILE:
             if _window is None:
                 _window = _open(status)
@@ -146,4 +152,6 @@ def set_status(status):
 def close():
     """Tear the window down; call it once when the app quits so the Tk
     interpreter does not sit around waiting for events at exit."""
+    global _quitting
+    _quitting = True  # a worker thread still running mid-cycle must not re-open
     _close()
