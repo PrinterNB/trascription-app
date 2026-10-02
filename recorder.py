@@ -121,7 +121,7 @@ def _ffmpeg_chunk(name, seconds):
 
 
 def _dshow_key_held(name, is_key_held, timeout, chunk=0.5, on_start=None, idle_wait=5.0,
-                    release_grace=0.5):
+                    release_grace=0.5, on_chunk=None):
     """Capture continuously and keep only the audio while the key is held.
 
     The stream runs whether or not the key is down, so it is already rolling
@@ -193,6 +193,11 @@ def _dshow_key_held(name, is_key_held, timeout, chunk=0.5, on_start=None, idle_w
                             on_start()
                     parts.append(raw)
                     total += raw.size
+                    if on_chunk:
+                        try:
+                            on_chunk(raw.astype(numpy.float32) / 32768.0)
+                        except Exception:
+                            pass  # a live-typing hiccup must not stop capture
                 elif started and not released:
                     # Key just came up. The chunk in hand was still recording
                     # while it was down, so keep it (dropping it used to eat
@@ -202,11 +207,21 @@ def _dshow_key_held(name, is_key_held, timeout, chunk=0.5, on_start=None, idle_w
                     t_release = time.time()
                     parts.append(raw)
                     total += raw.size
+                    if on_chunk:
+                        try:
+                            on_chunk(raw.astype(numpy.float32) / 32768.0)
+                        except Exception:
+                            pass
                 elif released:
                     want = grace_target - grace_taken
                     take = raw[:min(want, raw.size)] if want > 0 else raw[:0]
                     parts.append(take)
                     total += take.size
+                    if on_chunk and take.size:
+                        try:
+                            on_chunk(take.astype(numpy.float32) / 32768.0)
+                        except Exception:
+                            pass
                     grace_taken += raw.size
                     if grace_taken >= grace_target:
                         proc.terminate()  # grace done: cut the long stream short
@@ -251,7 +266,7 @@ def _sd_fixed(seconds, samplerate, dev):
 
 
 def _sd_key_held(is_key_held, timeout, dev, on_start=None, idle_wait=5.0,
-                 release_grace=0.5):
+                 release_grace=0.5, on_chunk=None):
     """PortAudio twin of _dshow_key_held (same idle_wait/timeout split)."""
     frames = []
 
@@ -263,6 +278,7 @@ def _sd_key_held(is_key_held, timeout, dev, on_start=None, idle_wait=5.0,
     t0 = time.time()
     t_press = t0
     duration = 0.0
+    seen = 0
     with sounddevice.RawInputStream(
         samplerate=SAMPLERATE, blocksize=1600, device=dev,
         dtype="int16", channels=1, callback=collect,
@@ -289,12 +305,28 @@ def _sd_key_held(is_key_held, timeout, dev, on_start=None, idle_wait=5.0,
                     break
             else:
                 del frames[:]  # idle: drop anything heard before the press
+            if started and on_chunk and len(frames) > seen:
+                blob = b"".join(frames[seen:])
+                seen = len(frames)
+                try:
+                    on_chunk(numpy.frombuffer(blob, dtype=numpy.int16).astype(
+                        numpy.float32) / 32768.0)
+                except Exception:
+                    pass  # a live-typing hiccup must not stop capture
             time.sleep(0.05)
         deadline = time.time() + 0.25
         while time.time() < deadline:
             time.sleep(0.01)
     if not started:
         return numpy.zeros(0, dtype=numpy.float32), 0.0, False
+    if on_chunk and len(frames) > seen:
+        # the frames every break skipped: the release moment - the tail
+        # release_grace exists for, which live typing must still get
+        try:
+            on_chunk(numpy.frombuffer(b"".join(frames[seen:]), dtype=numpy.int16).astype(
+                numpy.float32) / 32768.0)
+        except Exception:
+            pass
     return _to_float(frames), duration, started
 
 
@@ -307,7 +339,7 @@ def record_fixed(seconds, samplerate=SAMPLERATE, device=None):
 
 
 def record_key_held(is_key_held, timeout=600, device=None, on_start=None, idle_wait=5.0,
-                    release_grace=0.5):
+                    release_grace=0.5, on_chunk=None):
     """Capture continuously; keep audio only while `is_key_held()` is true.
 
     Capture runs ahead of the press, so listening begins the moment the key
@@ -315,14 +347,16 @@ def record_key_held(is_key_held, timeout=600, device=None, on_start=None, idle_w
     of letting go survive. `idle_wait` bounds the wait for a press: when nothing
     was ever held we return quickly so callers can re-read their config (a
     trigger key changed on the settings page applies within idle_wait). `on_start`
-    is called once when the key first registers. Returns
-    (audio, duration_seconds, key_was_held)."""
+    is called once when the key first registers; `on_chunk(float32 chunk)` gets
+    every kept chunk as it is captured (held audio plus the grace tail) - live
+    typing uses it. Returns (audio, duration_seconds, key_was_held)."""
     mode, val = _resolve(device)
     if mode == "dshow":
         return _dshow_key_held(val, is_key_held, timeout, on_start=on_start,
-                               idle_wait=idle_wait, release_grace=release_grace)
+                               idle_wait=idle_wait, release_grace=release_grace,
+                               on_chunk=on_chunk)
     return _sd_key_held(is_key_held, timeout, val, on_start, idle_wait,
-                        release_grace)
+                        release_grace, on_chunk)
 
 
 def _to_float(frames):

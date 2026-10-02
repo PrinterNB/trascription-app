@@ -101,6 +101,48 @@ def apply_commands(text, commands):
     return out
 
 
+def _live_text(text, commands, settle=False):
+    """apply_commands for live typing (same left-to-right, non-overlapping
+    matching), but a trailing run that could still complete a shortcut phrase
+    is held back until it settles: the words typed live always match what
+    the full live text would say. settle=True types the remainder (speech is
+    over). NB: inserted text is never rescanned, so shortcut rows that feed
+    one another ("cat→dog" + "dog→wolf") chain only in non-live mode."""
+    cmds = []
+    for c in commands:
+        say = (c.get("say") or "").strip()
+        if say:
+            cmds.append((say.lower(), c.get("insert", "")))
+    low = text.lower()
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        hit = None
+        for say, ins in cmds:
+            if low.startswith(say, i):
+                hit = (say, ins)
+                break
+        if hit:
+            out.append(hit[1])
+            i += len(hit[0])
+            continue
+        if not settle and any(len(s) > n - i and s.startswith(low[i:]) for s, _ in cmds):
+            break  # could still become a shortcut phrase: hold it back
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
+def _shared_prefix_len(a, b):
+    n = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        n += 1
+    return n
+
+
 def _chunks(text, size):
     parts = []
     i = 0
@@ -152,9 +194,34 @@ def hotkey_loop():
                 continue
             key = CFG.get("trigger_key", "f9")
             set_status("waiting for the trigger key...")
+            # live typing only makes sense when typing into the focused window
+            live_on = bool(CFG.get("live_mode", False)) and CFG.get(
+                "output_mode", "autotype") != "clipboard"
+            live = asr.LiveSession(CFG) if live_on else None
+            # snapshot shortcuts for this dictation: the settings page shares
+            # this very CFG dict, and an edit mid-hold must not retypes a
+            # middle of a sentence that is already in the window
+            live_cmds = list(CFG.get("commands", [])) if live else []
+            live_raw = [""]  # committed raw hypothesis text
+            live_typed = [""]  # what was actually typed (shortcuts applied)
+
+            def live_on_chunk(chunk):
+                try:
+                    d = live.feed(chunk)
+                    if not d:
+                        return
+                    live_raw[0] += d
+                    out = _live_text(live_raw[0], live_cmds)
+                    if len(out) > len(live_typed[0]):
+                        send_keys(out[len(live_typed[0]):])
+                        live_typed[0] = out
+                except Exception as e:
+                    log_error(f"live typing failed mid-speech: {e}")
+
             audio, duration, held = recorder.record_key_held(
                 lambda: key_down(key), device=mic_device(),
                 on_start=lambda: set_status("recording"),
+                on_chunk=live_on_chunk if live else None,
                 idle_wait=2.0,  # short so the loop re-reads CFG: a trigger key
                 # changed on the settings page applies within a few seconds
             )
@@ -172,6 +239,42 @@ def hotkey_loop():
                 continue
             if recorder.peak(audio) < 0.002:
                 note(f"heard {duration:.1f}s of SILENCE - microphone not capturing")
+                set_status("idle")
+                continue
+            if live:
+                # flush: finish() completes the hypothesis; type everything past
+                # what live typing already sent, with shortcuts fully settled
+                set_status("processing")
+                note(f"heard {duration:.1f}s of audio")
+                try:
+                    live_raw[0] += live.finish()
+                except Exception as e:
+                    log_error(f"live flush failed: {e}")
+                    note(f"live flush error: {e}")
+                if live.last_error:
+                    # the first live pass is where a bad engine/model config
+                    # fails - live mode would otherwise stay silent forever
+                    log_error(f"live transcription failed: {live.last_error}")
+                    note(f"engine error: {live.last_error}")
+                out = _live_text(live_raw[0], live_cmds, settle=True)
+                sent = live_typed[0]
+                if out.startswith(sent):
+                    tail = out[len(sent):]
+                else:
+                    # rare: a final pass rewrote text already typed - type the
+                    # part past the disagreement; what was typed stays as typed
+                    note("live text was revised at the end - typed the rest as-is")
+                    tail = out[_shared_prefix_len(sent, out):]
+                if tail:
+                    try:
+                        send_keys(tail)
+                    except Exception as e:
+                        log_error(f"output failed: {e}")
+                        note(f"output error: {e}")
+                if out:
+                    note(f"live typed ({len(out)} chars)")
+                else:
+                    note("nothing recognized (empty text)")
                 set_status("idle")
                 continue
             set_status("processing")

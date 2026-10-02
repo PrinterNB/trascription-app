@@ -2,6 +2,8 @@ import os
 
 import config as config_mod
 
+import numpy
+
 _CACHE = {}
 
 
@@ -73,5 +75,121 @@ def _hf_transformers(audio, model_id, gpu=False):
 def _run_hf(pipe, audio):
     out = pipe({"raw": audio, "sampling_rate": 16000})
     return (out["text"] if isinstance(out, dict) else out).strip()
+
+
+class LiveSession:
+    """Progressive live typing for engines without a native streaming API (none
+    of the ones here have one). While the user speaks, feed() re-transcribes
+    the growing audio every STEP seconds and commits only text two
+    consecutive hypotheses agree on, word for word, holding SAFETY_WORDS
+    words back so a pass never types words a later pass would rewrite.
+    Works with every engine: fast models (Whisper) keep pace with speech,
+    big ones lag behind and catch up when finish() runs at release. If the
+    hypothesis rewrites text already committed, commits stall - the final
+    flush types the remainder and says so.
+
+    feed(chunk) returns text newly safe to type ("" most calls);
+    finish() flushes the rest."""
+
+    SR = 16000
+    STEP = 1.5            # seconds of new speech between hypothesis passes
+    WINDOW_MAX = 45.0     # re-transcribe at most this many seconds (cap cost)
+    SAFETY_WORDS = 2      # words never committed until one more pass agrees
+
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.chunks = []
+        self.head = 0      # frames dropped from the front of the window
+        self.total = 0     # frames fed so far
+        self.pend = 0.0    # frames fed since the last pass
+        self.prev = ""     # last hypothesis
+        self.committed = ""
+        self.last_error = None
+
+    def feed(self, audio):
+        if audio is None or len(audio) == 0:
+            return ""
+        self.chunks.append(numpy.asarray(audio, dtype=numpy.float32))
+        self.total += len(audio)
+        self.pend += len(audio)
+        if self.pend < self.STEP * self.SR:
+            return ""
+        return self._pass()
+
+    def finish(self):
+        return self._pass(final=True)
+
+    def _pass(self, final=False):
+        self.pend = 0.0
+        window = self._window()
+        if window.size == 0:
+            return ""
+        try:
+            h = transcribe(window, self.cfg).strip()
+        except Exception as e:
+            self.last_error = str(e)  # the FIRST pass is where a bad engine
+            return ""                # config fails here, not at startup: keep
+                                     # it for the caller so the user gets told
+        if final:
+            if h.startswith(self.committed):
+                new = h[len(self.committed):]
+                self.committed = h
+                return new
+            # trimmed window or rewritten hypothesis: type what h adds past
+            # the words it shares with what is already committed
+            tail = self._tail_after_overlap(h)
+            if tail:
+                self.committed = (self.committed + " " + tail).strip()
+            return tail
+        if not self.prev:
+            self.prev = h
+            return ""
+        cand = self._safe_prefix(self.prev, h)
+        self.prev = h
+        if len(cand) <= len(self.committed) or not cand.startswith(self.committed):
+            return ""  # cannot untype: hold off until passes agree again
+        new = cand[len(self.committed):]
+        self.committed = cand
+        return new
+
+    def _window(self):
+        if not self.chunks:
+            return numpy.zeros(0, dtype=numpy.float32)
+        cat = numpy.concatenate(self.chunks)
+        cap = int(self.WINDOW_MAX * self.SR)
+        skip = max(self.head, cat.size - cap)
+        if skip:
+            cat = cat[skip:]
+        self.head = skip
+        # storage follows the window: drop chunks fully before it, or a long
+        # dictation keeps every frame and every pass costs the whole session
+        while len(self.chunks) > 1 and len(self.chunks[0]) <= self.head:
+            self.head -= len(self.chunks.pop(0))
+        return cat
+
+    def _safe_prefix(self, prev, h):
+        """Longest word-aligned prefix prev and h agree on, minus SAFETY_WORDS."""
+        n = min(len(prev), len(h))
+        i = 0
+        while i < n and prev[i] == h[i]:
+            i += 1
+        lcp = h[:i]
+        sp = lcp.rfind(" ")
+        if sp < 0:
+            return ""
+        words = lcp[:sp].split()
+        if len(words) <= self.SAFETY_WORDS:
+            return ""
+        return " ".join(words[:-self.SAFETY_WORDS])
+
+    def _tail_after_overlap(self, h):
+        """Words of h past whatever h and the committed text end/start sharing
+        (a trimmed window repeats a few of the last words as context)."""
+        cw = self.committed.split()
+        hw = h.split()
+        for t in range(min(len(cw), len(hw)), -1, -1):
+            if cw[len(cw) - t:] == hw[:t]:
+                return " ".join(hw[t:]).strip()
+        return ""
 
 

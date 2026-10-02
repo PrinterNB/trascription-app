@@ -17,6 +17,9 @@ DEFAULTS = {
     # Transcription compute: false = CPU only (every core), true = CUDA GPU
     # (falls back to CPU when no GPU is available).
     "gpu": False,
+    # Live typing: type recognized words while still holding the key (works
+    # with every engine; only stays in sync with fast models). Off by default.
+    "live_mode": False,
 }
 
 

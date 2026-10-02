@@ -294,6 +294,8 @@ def _norm_cfg(raw):
     cfg["hf_model"] = hf
     if cfg.get("output_mode") not in ("autotype", "clipboard"):
         cfg["output_mode"] = "autotype"
+    # Live typing is stored as a plain bool; the page's switch maps onto it.
+    cfg["live_mode"] = bool(cfg.get("live_mode", False))
     if cfg.get("whisper_model") not in WHISPER_SIZES:
         cfg["whisper_model"] = "base"
     cmds = []
@@ -518,6 +520,8 @@ function gather() {
   c.language = st.language || null;
   c.input_device = String(st.input_device === null || st.input_device === undefined ? '' : st.input_device);
   c.compute = st.compute || 'cpu';
+  // the page keeps 'on'/'off' in its dropdown; config.json stores a bool
+  c.live_mode = st.live_mode === 'on' || st.live_mode === true;
   c.commands = [];
   for (var i = 0; i < st.cmds.length; i++) { var o = st.cmds[i]; if (o.say.trim()) c.commands.push({ say: o.say.trim(), insert: o.insert }); }
   return c;
@@ -559,6 +563,14 @@ selectField(f, 'Microphone:', 'input_device', D.mics, null);
 st.compute = st.gpu ? 'gpu' : 'cpu';
 selectField(f, 'Compute device:', 'compute', D.compute, null);
 selectField(f, 'Output mode:', 'output_mode', D.outputs, null);
+st.live_mode = st.live_mode ? 'on' : 'off';
+selectField(f, 'Live typing (type while you speak):', 'live_mode', D.live_mode, null);
+var liveHelp = document.createElement('div'); liveHelp.className = 'note';
+liveHelp.textContent = ('Works with every engine but keeps pace only with fast ones: OpenAI Whisper (any size) '
+  + 'stays roughly in sync with speech; NVIDIA Canary / Parakeet / Custom models lag behind and catch up when you '
+  + 'release. Needs output mode "type into focused window" - with clipboard output this setting has no effect. '
+  + 'Voice shortcuts are respected while typing live too.');
+f.appendChild(liveHelp);
 selectField(f, 'Transcription engine:', 'engine', D.engines, fillModel);
 modelBlock = document.createElement('div'); f.appendChild(modelBlock); fillModel();
 selectField(f, 'Language:', 'language', D.languages, null);
@@ -820,6 +832,8 @@ def _page_data():
         "parakeet": [[m, label] for m, label in PARAKEET_MODELS],
         "languages": [[c, label] for c, label in LANGUAGES],
         "outputs": [[m, label] for m, label in OUTPUT_MODES],
+        "live_mode": [["off", "Off - type after you release"],
+                      ["on", "On - type while you speak"]],
         "compute": [["cpu", "CPU - all cores"], ["gpu", "GPU - CUDA (falls back to CPU)"]],
     }
 
