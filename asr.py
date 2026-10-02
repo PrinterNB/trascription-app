@@ -80,21 +80,22 @@ def _run_hf(pipe, audio):
 class LiveSession:
     """Progressive live typing for engines without a native streaming API (none
     of the ones here have one). While the user speaks, feed() re-transcribes
-    the growing audio every STEP seconds and commits only text two
-    consecutive hypotheses agree on, word for word, holding SAFETY_WORDS
-    words back so a pass never types words a later pass would rewrite.
-    Works with every engine: fast models (Whisper) keep pace with speech,
-    big ones lag behind and catch up when finish() runs at release. If the
-    hypothesis rewrites text already committed, commits stall - the final
-    flush types the remainder and says so.
+    the growing audio every STEP seconds; the FIRST hypothesis commits
+    immediately (minus the one word in flight), so typing starts within about
+    a second of speech, and later growth only extends text at least two
+    consecutive hypotheses read the same way - nothing typed is ever
+    retracted. Works with every engine: fast models (Whisper) keep pace with
+    speech, big ones lag behind and catch up when finish() runs at release.
+    If a hypothesis rewrites already-committed text, growth stalls and the
+    final flush types the remainder (and says so).
 
     feed(chunk) returns text newly safe to type ("" most calls);
     finish() flushes the rest."""
 
     SR = 16000
-    STEP = 1.5            # seconds of new speech between hypothesis passes
+    STEP = 1.0            # seconds of new speech between hypothesis passes
     WINDOW_MAX = 45.0     # re-transcribe at most this many seconds (cap cost)
-    SAFETY_WORDS = 2      # words never committed until one more pass agrees
+    SAFETY_WORDS = 1      # only the word in flight is held back
 
     def __init__(self, cfg):
         self.cfg = cfg
@@ -141,10 +142,12 @@ class LiveSession:
             if tail:
                 self.committed = (self.committed + " " + tail).strip()
             return tail
-        if not self.prev:
-            self.prev = h
-            return ""
-        cand = self._safe_prefix(self.prev, h)
+        # the first pass commits its own head right away (minus the word in
+        # flight) so typing starts the moment speech starts; later growth still
+        # needs agreement with the previous hypothesis, so nothing typed is
+        # ever retracted - only words at least two consecutive passes read the
+        # same way extend the committed text
+        cand = self._safe_prefix(self.prev or h, h)
         self.prev = h
         if len(cand) <= len(self.committed) or not cand.startswith(self.committed):
             return ""  # cannot untype: hold off until passes agree again

@@ -132,9 +132,12 @@ the tab — the page stays available for the whole time the app runs.
 - **Live typing (type while you speak)** — off by default. With output mode
   "type into the focused window" and this ON, recognized words are typed into
   the window **while you are still talking**: the recorder keeps feeding the
-  growing audio to the model every couple of seconds and text is typed only
-  after two consecutive passes agree on it word-for-word (none of these
-  models has a native streaming API, so this consensus is what makes it safe).
+  growing audio to the model every second, and the first words you say commit
+  right away (about a second after speech starts) - later words are typed
+  once the model is steady on them, and the word you are still saying is
+  always held back, so nothing typed live is ever retracted (none of these
+  models has a native streaming API, so this re-confirmation is what makes it
+  safe).
   Works with every engine; OpenAI Whisper (any size) stays roughly in sync
   with your speech, while **Canary / Parakeet / Custom models lag behind**
   and catch up the moment you release. Voice shortcuts ("say X → insert Y")
