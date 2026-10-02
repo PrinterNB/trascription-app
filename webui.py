@@ -224,8 +224,14 @@ def _log_note(msg):
 
 def _norm_cfg(raw):
     cfg = dict(config_mod.DEFAULTS)
-    cfg.update(raw or {})
-    cfg["gpu"] = bool(cfg.get("gpu", False))
+    raw = raw if isinstance(raw, dict) else {}
+    cfg.update(raw)
+    # The settings page edits a human-facing "compute" switch; the config key is a bool.
+    if "compute" in raw:
+        cfg["gpu"] = str(raw.get("compute")).strip().lower() == "gpu"
+    else:
+        cfg["gpu"] = bool(cfg.get("gpu", False))
+    cfg.pop("compute", None)
     if not cfg.get("language"):
         cfg["language"] = None
     if not _valid_trigger(cfg.get("trigger_key")):
@@ -470,7 +476,7 @@ function gather() {
   if (st.engine === 'custom' && customEl && customEl.value.trim()) c.hf_model = customEl.value.trim();
   c.language = st.language || null;
   c.input_device = String(st.input_device === null || st.input_device === undefined ? '' : st.input_device);
-  c.gpu = !!st.gpu;
+  c.compute = st.compute || 'cpu';
   c.commands = [];
   for (var i = 0; i < st.cmds.length; i++) { var o = st.cmds[i]; if (o.say.trim()) c.commands.push({ say: o.say.trim(), insert: o.insert }); }
   return c;
@@ -509,6 +515,8 @@ var customKeyEd = null;
   row.appendChild(lab); row.appendChild(ed); f.appendChild(row);
 })();
 selectField(f, 'Microphone:', 'input_device', D.mics, null);
+st.compute = st.gpu ? 'gpu' : 'cpu';
+selectField(f, 'Compute device:', 'compute', D.compute, null);
 selectField(f, 'Output mode:', 'output_mode', D.outputs, null);
 selectField(f, 'Transcription engine:', 'engine', D.engines, fillModel);
 modelBlock = document.createElement('div'); f.appendChild(modelBlock); fillModel();
@@ -696,6 +704,9 @@ class Handler(BaseHTTPRequestHandler):
             body = {}
         if self.path == "/save":
             cfg = _norm_cfg(body.get("cfg"))
+            live = dict(LIVE_CFG) if LIVE_CFG is not None else config_mod.load()
+            live.update(cfg)
+            cfg = _norm_cfg(live)
             config_mod.save(cfg)
             if LIVE_CFG is not None:
                 LIVE_CFG.clear()
@@ -744,6 +755,7 @@ def _page_data():
         "parakeet": [[m, label] for m, label in PARAKEET_MODELS],
         "languages": [[c, label] for c, label in LANGUAGES],
         "outputs": [[m, label] for m, label in OUTPUT_MODES],
+        "compute": [["cpu", "CPU - all cores"], ["gpu", "GPU - CUDA (falls back to CPU)"]],
     }
 
 

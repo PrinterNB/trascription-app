@@ -104,6 +104,10 @@ the tab — the page stays available for the whole time the app runs.
   "recorded silence"), so you can prove the problem is the source, not the app.
   Listing the Windows sources requires `ffmpeg` on `PATH` (the recorder captures
   through ffmpeg's DirectShow interface when PortAudio sees no usable input).
+- **Compute device** — `CPU - all cores` (default) or `GPU - CUDA`: which device
+  transcribes. This is the same switch as the tray menu's "Use GPU (CUDA)" /
+  "Use CPU only" pair — page and tray write the same setting, and GPU falls back
+  to CPU when the machine has no CUDA GPU.
 - **Engine** — model options shown change automatically to match the engine you
   select:
   - `OpenAI Whisper (faster-whisper)` — fast on CPU; shows a model-size dropdown:
