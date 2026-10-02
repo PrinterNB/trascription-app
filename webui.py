@@ -171,7 +171,7 @@ CANARY_MODELS = [
     ("nvidia/canary-1b-v2", "Canary 1B v2 - 25 languages"),
 ]
 PARAKEET_MODELS = [
-    ("nvidia/parakeet-tdt-0.6b-v3", "Parakeet TDT 0.6B v3 - 26 languages"),
+    ("nvidia/parakeet-tdt-0.6b-v3", "Parakeet TDT 0.6B v3 - 25 languages"),
     ("nvidia/parakeet-ctc-1.1b", "Parakeet CTC 1.1B - English"),
     ("nvidia/parakeet-rnnt-1.1b", "Parakeet RNNT 1.1B - English"),
 ]
@@ -194,7 +194,7 @@ MODEL_BIO = {
     "Systran/faster-whisper-large-v3": "OpenAI Whisper large-v3: best Whisper accuracy, ~3 GB, multilingual.",
     "Systran/faster-whisper-large-v3-turbo": "OpenAI Whisper large-v3-turbo: large-tier accuracy with a smaller decoder - much faster than large-v3.",
     "nvidia/canary-1b-v2": "NVIDIA Canary 1B v2: fast multilingual speech-to-text covering 25 languages; tuned for natural conversational speech.",
-    "nvidia/parakeet-tdt-0.6b-v3": "NVIDIA Parakeet TDT 0.6B v3: highly accurate English ASR that also covers 26 languages; TDT (token-and-duration transducer) decodes quickly.",
+    "nvidia/parakeet-tdt-0.6b-v3": "NVIDIA Parakeet TDT 0.6B v3: highly accurate English ASR that also covers 25 languages; TDT (token-and-duration transducer) decodes quickly.",
     "nvidia/parakeet-ctc-1.1b": "NVIDIA Parakeet CTC 1.1B: English-only model using CTC decoding - simple and fast, but less punctuation-friendly than TDT.",
     "nvidia/parakeet-rnnt-1.1b": "NVIDIA Parakeet RNNT 1.1B: English-only RNN transducer; more accurate than CTC, slower.",
     "nvidia/canary-180m-flash": "NVIDIA Canary 180M Flash: very fast English/Spanish fast-audio model.",

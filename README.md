@@ -58,7 +58,7 @@ stores absolute paths, so a copy works from anywhere.
   browser at `http://127.0.0.1:47111` (typing `127.0.0.1` **without** that port
   hits port 80, not the app — that shows "didn't send any data").
 - To run just the settings page (debugging): `python app.py --settings` — it
-  prints the URL; press Ctrl+Q in the terminal to quit.
+  prints the URL; press Ctrl+C in the terminal to quit.
 - Status colors: gray = idle, **red = listening to you**, amber = transcribing,
   back to gray when the text was inserted.
 - Debugging: run `.venv\Scripts\python.exe app.py` in a terminal to see errors.
@@ -123,9 +123,11 @@ the tab — the page stays available for the whole time the app runs.
     Qwen 2.5B, plain Canary 1B — cannot be loaded by transformers and are not
     offered.
   - `NVIDIA Parakeet` — very accurate English ASR (TDT 0.6B v3 also covers
-    26 languages); shows Parakeet presets. CPU-friendly.
+    25 languages); shows Parakeet presets. CPU-friendly.
   - `Custom model` — shows a free-text field for any Hugging Face ASR model ID.
-- **Language** — auto-detect by default; pick explicitly for better accuracy.
+- **Language** — auto-detect by default; pick explicitly for better accuracy
+  (Whisper engine only — the Canary/Parakeet models auto-detect and always
+  ignore this field).
 - **Output mode** — type into the focused window, or copy to clipboard.
 - **Voice shortcuts** — "say this → insert that" rows (e.g. `insert email` →
   your email): press "Add voice shortcut", type both sides in the boxes,
