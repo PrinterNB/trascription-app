@@ -10,7 +10,7 @@ transcription is typed into that window. Say a configured shortcut phrase like
 
 | Part | Implementation |
 | --- | --- |
-| Speech recognition | [faster-whisper](https://github.com/DeepInsider/faster-whisper) (OpenAI Whisper, CTranslate2, CPU int8) — plus NVIDIA Canary and NVIDIA Parakeet as alternative engines |
+| Speech recognition | [faster-whisper](https://github.com/DeepInsider/faster-whisper) (OpenAI Whisper, CTranslate2, all CPU cores — plus NVIDIA Canary and NVIDIA Parakeet as alternative engines), with a CPU/GPU toggle in the tray menu |
 | Tray icon | `pystray` — the app lives in your system tray, no terminal window |
 | Hold-to-talk | any F-key / Ctrl / Alt / Shift / letter / digit, configurable in the settings UI — or click "Detect my key" and physically press the shortcut you want (default `F9`) |
 | Microphone | Windows DirectShow sources via `ffmpeg` (the real system mic list), with `sounddevice`/PortAudio as a fallback |
@@ -46,7 +46,10 @@ tray. Copy `VoiceDictation.bat` to your Desktop, a folder, or a USB stick — it
 stores absolute paths, so a copy works from anywhere.
 
 - **Right-click the tray icon** → menu: Open settings / **Model manager** / Pause
-  listening / Resume listening / Test microphone / Quit. "Open settings" and
+  listening / Resume listening / **Use GPU (CUDA)** / **Use CPU only** / Test
+  microphone / Quit. The GPU/CPU pair is a toggle: exactly one is marked checked,
+  picking which device transcribes (GPU falls back to CPU when no CUDA GPU
+  exists); the choice persists in `config.json`. "Open settings" and
   "Model manager" just open the relevant page in your browser and return
   immediately — the tray menu keeps working while the page is open, and closing
   the browser tab is all it takes to be done.
@@ -119,10 +122,18 @@ the tab — the page stays available for the whole time the app runs.
   your email): press "Add voice shortcut", type both sides in the boxes,
   "Remove" deletes a row.
 - **Test microphone** — records 4 s and shows what was recognized (useful for
-  debugging mic/engine setup).
+  debugging mic/engine setup). It now distinguishes a dead source ("no audio
+  returned") from a live-but-quiet one ("recorded SILENCE").
 - **Live status** — the settings page also shows, in real time, where the hold-to-talk
   pipeline currently is (idle / recording / transcribing / "nothing recognized" /
   "too short"). If a cycle produces no text, look at this line to see where it stopped.
+
+Transcription always uses **every CPU core** (ctranslate2's thread count is set to
+`os.cpu_count()`), so a 16-core machine stops crawling at 10%. Low usage **while
+recording** is expected: capture is I/O-bound, the cores get used during the
+transcription step. The **Use GPU (CUDA)** tray-menu toggle switches the engine to
+CUDA (`int8_float16`) when the ctranslate2 build has CUDA; without a GPU it falls
+back to CPU and says so.
 
 A separate **Models** page lives at `http://127.0.0.1:47111/models.html`: it lists every
 model (Whisper sizes, Canary, Parakeet presets) plus anything else physically present in

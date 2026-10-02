@@ -30,6 +30,9 @@ KEY_VK = webui.KEY_VK
 CFG = config_mod.load()
 STATUS = {"status": "idle", "paused": False}
 ICON = None
+# Helpers (ffmpeg, powershell, cscript) must never open a console window: it
+# would steal keyboard focus from the user's target window.
+NO_CONSOLE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def log_error(msg):
@@ -111,7 +114,8 @@ def _chunks(text, size):
 
 def ps_run(script):
     encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
-    subprocess.run(["powershell.exe", "-EncodedCommand", encoded], check=False)
+    subprocess.run(["powershell.exe", "-EncodedCommand", encoded], check=False,
+                   creationflags=NO_CONSOLE)
 
 
 def set_clipboard(text):
@@ -123,7 +127,8 @@ def send_keys(text):
     vbs = os.path.join(os.path.dirname(config_mod.CONFIG_PATH), "sendkeys.vbs")
     for chunk in _chunks(text, 3000):
         r = subprocess.run(
-            ["cscript.exe", "//nologo", vbs, chunk], capture_output=True, text=True
+            ["cscript.exe", "//nologo", vbs, chunk], capture_output=True, text=True,
+            creationflags=NO_CONSOLE,
         )
         if r.returncode != 0:
             raise OSError((r.stderr or r.stdout or "sendkeys failed").strip())
@@ -211,11 +216,25 @@ def on_resume(_icon, _item):
     STATUS["paused"] = False
 
 
+def on_gpu_on(_icon, _item):
+    CFG["gpu"] = True
+    config_mod.save(CFG)
+    note("GPU mode ON: transcription uses CUDA if present, otherwise CPU.")
+
+
+def on_gpu_off(_icon, _item):
+    CFG["gpu"] = False
+    config_mod.save(CFG)
+    note("GPU mode OFF: transcription uses the CPU with all cores.")
+
+
 MENU = Menu(
     MenuItem("Open settings", on_settings),
     MenuItem("Model manager", on_models),
     MenuItem("Pause listening", on_pause, checked=lambda _icon: STATUS["paused"]),
     MenuItem("Resume listening", on_resume, checked=lambda _icon: not STATUS["paused"]),
+    MenuItem("Use GPU (CUDA)", on_gpu_on, checked=lambda _icon: bool(CFG.get("gpu", False))),
+    MenuItem("Use CPU only", on_gpu_off, checked=lambda _icon: not CFG.get("gpu", False)),
     MenuItem("Test microphone", on_test),
     MenuItem("Quit", on_quit),
 )

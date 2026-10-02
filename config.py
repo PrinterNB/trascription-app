@@ -14,6 +14,9 @@ DEFAULTS = {
     # Microphone source: "" = auto-pick, "ds:<name>" = Windows/DirectShow source
     # (the real mic list), "sd:<idx>" = PortAudio input index.
     "input_device": "",
+    # Transcription compute: false = CPU only (every core), true = CUDA GPU
+    # (falls back to CPU when no GPU is available).
+    "gpu": False,
 }
 
 

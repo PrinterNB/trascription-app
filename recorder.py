@@ -7,6 +7,9 @@ import numpy
 import sounddevice
 
 SAMPLERATE = 16000
+# Spawned helpers (ffmpeg per capture chunk) must NOT open a console window: on
+# Windows each spawn would grab a conhost window and steal keyboard focus.
+NO_CONSOLE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def _list_dshow():
@@ -21,6 +24,7 @@ def _list_dshow():
         p = subprocess.run(
             [ff, "-hide_banner", "-f", "dshow", "-list_devices", "true", "-i", "video=none"],
             capture_output=True, text=True, timeout=15,
+            stdin=subprocess.DEVNULL, creationflags=NO_CONSOLE,
         )
     except Exception:
         return []
@@ -108,7 +112,8 @@ def _ffmpeg_chunk(name, seconds):
             "-acodec", "pcm_s16le", "-f", "s16le", "pipe:1"]
     try:
         p = subprocess.run(args, stdout=subprocess.PIPE,
-                          stderr=subprocess.DEVNULL, timeout=max(10.0, seconds * 4))
+                          stderr=subprocess.DEVNULL, timeout=max(10.0, seconds * 4),
+                          stdin=subprocess.DEVNULL, creationflags=NO_CONSOLE)
     except Exception:
         return numpy.zeros(0, dtype=numpy.int16)
     return numpy.frombuffer(p.stdout, dtype=numpy.int16)

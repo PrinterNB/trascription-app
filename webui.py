@@ -225,6 +225,7 @@ def _log_note(msg):
 def _norm_cfg(raw):
     cfg = dict(config_mod.DEFAULTS)
     cfg.update(raw or {})
+    cfg["gpu"] = bool(cfg.get("gpu", False))
     if not cfg.get("language"):
         cfg["language"] = None
     if not _valid_trigger(cfg.get("trigger_key")):
@@ -469,6 +470,7 @@ function gather() {
   if (st.engine === 'custom' && customEl && customEl.value.trim()) c.hf_model = customEl.value.trim();
   c.language = st.language || null;
   c.input_device = String(st.input_device === null || st.input_device === undefined ? '' : st.input_device);
+  c.gpu = !!st.gpu;
   c.commands = [];
   for (var i = 0; i < st.cmds.length; i++) { var o = st.cmds[i]; if (o.say.trim()) c.commands.push({ say: o.say.trim(), insert: o.insert }); }
   return c;
