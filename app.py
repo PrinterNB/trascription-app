@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -121,8 +122,15 @@ def ps_run(script):
 
 
 def set_clipboard(text):
-    for chunk in _chunks(text, 3000):
-        ps_run("Set-Clipboard -Value '" + chunk.replace("'", "''") + "'")
+    """One Set-Clipboard fed from a temp file: the old per-chunk loop called
+    Set-Clipboard once per chunk, and each call REPLACED the clipboard, so a
+    long dictation kept only its final 3000 characters."""
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "clip.txt")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        ps_run("Set-Clipboard -Value (Get-Content -Raw -Encoding UTF8 '" +
+               path.replace("'", "''") + "')")
 
 
 def send_keys(text):
@@ -186,7 +194,10 @@ def hotkey_loop():
                     log_error(f"output failed: {e}")
                     note(f"output error: {e}")
                 else:
-                    note(f"typed into focused window ({len(text)} chars)")
+                    where = ("copied to clipboard"
+                             if CFG.get("output_mode", "autotype") == "clipboard"
+                             else "typed into focused window")
+                    note(f"{where} ({len(text)} chars)")
             else:
                 note("nothing recognized (empty text)")
             set_status("idle")
@@ -203,7 +214,21 @@ def on_models(_icon, _item):
 
 
 def on_test(_icon, _item):
-    audio = recorder.record_fixed(4)
+    # test the source the settings page picked - not whatever auto would choose -
+    # and tell a dead source apart from a quiet one, like the page's test does
+    audio = recorder.record_fixed(4, device=mic_device())
+    if len(audio) == 0:
+        messagebox.showinfo(
+            "Voice Dictation test",
+            "That source returned NO AUDIO at all - it is not a usable "
+            "microphone; pick another one in the settings UI.")
+        return
+    if recorder.peak(audio) < 0.002:
+        messagebox.showinfo(
+            "Voice Dictation test",
+            'The microphone recorded SILENCE - pick a different "Microphone" '
+            "in the settings UI (default/auto may be the wrong input).")
+        return
     try:
         text = asr.transcribe(audio, CFG)
         messagebox.showinfo("Voice Dictation test", ("Heard: " + text) if text else "Nothing recognized.")
@@ -213,6 +238,9 @@ def on_test(_icon, _item):
 
 
 def on_quit(_icon, _item):
+    # the hotkey thread lives on past ICON.run(); pausing keeps it from
+    # recording (and re-opening the HUD) after the app is asked to quit
+    STATUS["paused"] = True
     if ICON:
         ICON.stop()
 
@@ -227,13 +255,25 @@ def on_resume(_icon, _item):
 
 def on_gpu_on(_icon, _item):
     CFG["gpu"] = True
-    config_mod.save(CFG)
+    try:
+        config_mod.save(CFG)
+    except Exception as e:
+        log_error(f"could not save GPU setting: {e}")
+        note("GPU switch active for this run, but config.json could not be "
+             "written: " + str(e))
+        return
     note("GPU mode ON: transcription uses CUDA if present, otherwise CPU.")
 
 
 def on_gpu_off(_icon, _item):
     CFG["gpu"] = False
-    config_mod.save(CFG)
+    try:
+        config_mod.save(CFG)
+    except Exception as e:
+        log_error(f"could not save GPU setting: {e}")
+        note("GPU switch off for this run, but config.json could not be "
+             "written: " + str(e))
+        return
     note("GPU mode OFF: transcription uses the CPU with all cores.")
 
 
