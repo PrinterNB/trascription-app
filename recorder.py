@@ -152,6 +152,7 @@ def _dshow_key_held(name, is_key_held, timeout, chunk=0.5, on_start=None, idle_w
     grace_target = int(release_grace * SAMPLERATE)
     t0 = time.time()
     t_press = t0
+    t_release = None
     read_bytes = int(chunk * SAMPLERATE) * 2
     span = 30.0
     dead_spans = 0
@@ -198,6 +199,7 @@ def _dshow_key_held(name, is_key_held, timeout, chunk=0.5, on_start=None, idle_w
                     # up to a chunk of the speaker's last words), then start
                     # the grace window.
                     released = True
+                    t_release = time.time()
                     parts.append(raw)
                     total += raw.size
                 elif released:
@@ -227,7 +229,11 @@ def _dshow_key_held(name, is_key_held, timeout, chunk=0.5, on_start=None, idle_w
     if not parts:
         return numpy.zeros(0, dtype=numpy.float32), 0.0, started
     cat = numpy.concatenate(parts)
-    return cat.astype(numpy.float32) / 32768.0, total / float(SAMPLERATE), started
+    # Report how long the key was actually held, not the audio length: the
+    # kept audio now also carries the grace tail, and the caller's "heard Xs"
+    # note and its too-short guard want the hold time itself.
+    dur = (t_release - t_press) if t_release else total / float(SAMPLERATE)
+    return cat.astype(numpy.float32) / 32768.0, dur, started
 
 
 def _sd_fixed(seconds, samplerate, dev):
@@ -265,7 +271,7 @@ def _sd_key_held(is_key_held, timeout, dev, on_start=None, idle_wait=5.0,
             now = time.time()
             if not started and now - t0 > idle_wait:
                 break
-            if started and t_release is None and now - t_press > timeout:
+            if started and now - t_press > timeout:
                 break
             if is_key_held():
                 if not started:
