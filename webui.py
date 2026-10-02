@@ -619,18 +619,25 @@ function paint() {
     c2.textContent = r.installed ? 'present' : 'not downloaded';
     var c3 = tr.appendChild(document.createElement('td')); c3.textContent = r.size || '-';
     var c4 = tr.appendChild(document.createElement('td'));
-    if (r.installed) {
-      var delBtn = c4.appendChild(document.createElement('button')); delBtn.className = 'small';
-      delBtn.textContent = 'Delete';
-      delBtn.onclick = function () { act(r, 'delete'); };
-      var reBtn = c4.appendChild(document.createElement('button')); reBtn.className = 'small';
-      reBtn.textContent = 'Re-download';
-      reBtn.onclick = function () { act(r, 'download'); };
-    } else {
-      var dlBtn = c4.appendChild(document.createElement('button')); dlBtn.className = 'small';
-      dlBtn.textContent = 'Download';
-      dlBtn.onclick = function () { act(r, 'download'); };
-    }
+    rowActions(c4, r);
+  }
+}
+
+function rowActions(cell, r) {
+  // A function parameter, not the paint() loop's `var r`: closures made in a
+  // loop share one binding, so button handlers built inline would all act on
+  // the last row.
+  if (r.installed) {
+    var delBtn = cell.appendChild(document.createElement('button')); delBtn.className = 'small';
+    delBtn.textContent = 'Delete';
+    delBtn.onclick = function () { act(r, 'delete'); };
+    var reBtn = cell.appendChild(document.createElement('button')); reBtn.className = 'small';
+    reBtn.textContent = 'Re-download';
+    reBtn.onclick = function () { act(r, 'download'); };
+  } else {
+    var dlBtn = cell.appendChild(document.createElement('button')); dlBtn.className = 'small';
+    dlBtn.textContent = 'Download';
+    dlBtn.onclick = function () { act(r, 'download'); };
   }
 }
 
@@ -645,6 +652,7 @@ function act(r, kind) {
     .then(function(x){return x.json();})
     .then(function(j){
       if (j.error) busy((kind === 'download' ? 'Download failed: ' : 'Delete failed: ') + j.error);
+      else if (kind === 'delete' && j.removed === 0) busy('Nothing on disk for "' + r.label + '" - nothing was deleted.');
       else { busy(kind === 'download' ? 'Downloaded "' + r.label + '".' : 'Deleted "' + r.label + '".'); load(); }
     })
     .catch(function(e){ busy('Request failed: ' + e); });
