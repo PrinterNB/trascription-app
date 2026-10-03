@@ -45,7 +45,13 @@ for _c in range(ord("a"), ord("z") + 1):
 for _d in range(10):
     KEY_VK[str(_d)] = ord(str(_d))
 
-_MODS = ["ctrl", "alt", "shift", "win"]
+# Ctrl is deliberately NOT offered anywhere (dropdown or typed combinations):
+# with live typing a physically held Ctrl turns every typed character into a
+# Ctrl+letter shortcut, and WSH SendKeys has no modifier up/down token to
+# lift it (verified: every {CTRL UP}-style spelling raises). The limitation
+# is documented in README; keeping Ctrl out of the offer set is the honest
+# way to keep the trigger simple and correct.
+_MODS = ["alt", "shift", "win"]
 _NAMED = list(NAMED_KEYS)
 
 SINGLE_KEYS = [f"f{i}" for i in range(1, 13)] + _MODS + _NAMED
@@ -87,10 +93,24 @@ def _key_label(name):
     return name.upper()
 
 
+def key_is_down(vk):
+    """True if vk is currently DOWN (physically pressed or set programmatically).
+    GetKeyState's down bit is documented as undefined outside Shift/Ctrl/Alt
+    - the Win keys in fact never report it - while GetKeyboardState's
+    physical bit (0x40) is the documented way to see any physically held
+    key (games read it this way). Accept either: SendKeys never sets the
+    physical bit, so typed text cannot fake a trigger."""
+    if ctypes.windll.user32.GetKeyState(vk) & 0x8000:
+        return True
+    ks = (ctypes.c_ubyte * 256)()
+    ctypes.windll.user32.GetKeyboardState(ks)
+    return bool(ks[vk] & 0x40)
+
+
 def _key_held(name):
     for part in name.split("+"):
         part = part.strip()
-        if not (ctypes.windll.user32.GetKeyState(KEY_VK.get(part, 0)) & 0x8000):
+        if not key_is_down(KEY_VK.get(part, 0)):
             return False
     return True
 
@@ -119,7 +139,7 @@ def _held_keys():
     """Names of every watched key that is physically held right now."""
     held = []
     for tok, vk in _detect_order():
-        if ctypes.windll.user32.GetKeyState(vk) & 0x8000:
+        if key_is_down(vk):
             held.append(tok)
     return held
 
@@ -312,8 +332,10 @@ def _norm_cfg(raw):
 def _valid_trigger(name):
     if not isinstance(name, str) or not name:
         return False
-    parts = [p for p in name.split("+") if p.strip()]
-    return bool(parts) and all(p.strip() in KEY_VK for p in parts)
+    parts = [p.strip() for p in name.split("+") if p.strip()]
+    # Ctrl is not offered (see _MODS comment/README): legacy configs that
+    # saved a Ctrl combination reset to the default instead
+    return bool(parts) and all(p in KEY_VK and p != "ctrl" for p in parts)
 
 
 def _mic_options():
@@ -536,7 +558,14 @@ function normCombo(v) {
   for (var ti = 0; ti < toks.length; ti++) {
     var p = toks[ti].trim();
     if (!p) continue;
-    if (!_validKey[p]) return null;
+    if (p === 'ctrl' || p === 'control') {
+      setMsg('Ctrl is not offered: a physically held Ctrl cannot be lifted while typing (WSH has no modifier tokens) - use F-keys or combinations without Ctrl.');
+      return null;
+    }
+    if (!_validKey[p]) {
+      setMsg('That combination has an unknown key - use names like F9, Alt, Shift, Win, Space, Tab, Enter, Esc, A-Z, 0-9 joined with "+".');
+      return null;
+    }
     parts.push(p);
   }
   return parts.length ? parts.join('+') : null;
@@ -552,9 +581,9 @@ var customKeyEd = null;
   ed.onblur = function () {
     var v = (ed.textContent || '').trim();
     if (!v) return;
+    // normCombo names the exact problem (unknown key vs Ctrl-not-offered)
     var ok = normCombo(v);
     if (ok) st.trigger_key = ok;
-    else setMsg('That combination has an unknown key - use names like F9, Ctrl, Alt, Shift, Win, Space, Tab, Enter, Esc, A-Z, 0-9 joined with "+".');
   };
   customKeyEd = ed;
   row.appendChild(lab); row.appendChild(ed); f.appendChild(row);
@@ -571,10 +600,10 @@ liveHelp.textContent = ('Works with every engine but keeps pace only with fast o
   + 'release. Needs output mode "type into focused window" - with clipboard output this setting has no effect. '
   + 'Transcription runs on its own thread, so model time never delays your speech: words commit within '
   + 'fractions of a second of what you say. Voice shortcuts are respected while typing live too. '
-  + 'If your hand holds Ctrl while you dictate - even when your trigger itself is just an F-key - the app '
-  + 'checks the physical key state and sends each live burst as clipboard + Ctrl+V paste instead of typing '
-  + '(your held Ctrl turns a typed v into Ctrl+V), so no Ctrl+letter junk appears; this overwrites your '
-  + 'clipboard while you speak. Holding Alt or Shift cannot be handled this way - prefer plain F-keys.');
+  + 'Do not dictate with Ctrl in your hand: a physically held Ctrl turns every typed character into a '
+  + 'Ctrl+letter shortcut and nothing can lift it (WSH has no modifier tokens) - so Ctrl is not offered '
+  + 'as a trigger anywhere on this page, typed combinations included. Prefer F-keys and combinations '
+  + 'without Ctrl.');
 f.appendChild(liveHelp);
 selectField(f, 'Transcription engine:', 'engine', D.engines, fillModel);
 modelBlock = document.createElement('div'); f.appendChild(modelBlock); fillModel();

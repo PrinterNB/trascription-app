@@ -44,8 +44,10 @@ def log_error(msg):
 
 
 def key_down(name):
-    # A trigger may be a single key ("f9") or a combination ("ctrl+f9", "win+ctrl"):
-    # all parts must be physically held at once.
+    # A trigger may be a single key ("f9") or a combination ("f9+alt", "win+alt"):
+    # all parts must be physically held at once. key_is_down also reads the
+    # GetKeyboardState physical bit, which is what makes Win-key triggers work
+    # (GetKeyState's down bit is undefined/never set for Win).
     parts = [p for p in str(name).split("+") if p.strip()]
     if not parts:
         parts = ["f9"]
@@ -53,7 +55,7 @@ def key_down(name):
         vk = KEY_VK.get(part.strip())
         if vk is None:
             continue
-        if not (ctypes.windll.user32.GetKeyState(vk) & 0x8000):
+        if not webui.key_is_down(vk):
             return False
     return True
 
@@ -192,18 +194,12 @@ def hotkey_loop():
                 time.sleep(0.3)
                 continue
             key = CFG.get("trigger_key", "f9")
-            # live typing sends text WHILE the user's hand is on the trigger,
-            # and they may be physically holding Ctrl even when the trigger
-            # string does not list it (trigger "f2" while pressing Ctrl+F2).
-            # WSH's SendKeys has no modifier up/down token at all (verified:
-            # {CTRL UP} etc. all raise), so when the REAL Ctrl is down
-            # (key_down reads physical GetKeyState) and no Alt/Shift to
-            # complicate it, each live burst goes through the clipboard and
-            # is pasted by sending "v" - the held Ctrl makes that Ctrl+V.
-            # Checked per burst: key state can change mid-utterance.
-            def live_paste():
-                return key_down("ctrl") and not key_down("alt") \
-                    and not key_down("shift")
+            # live typing while ANY modifier is physically held changes what
+            # the target app receives (Ctrl+letter shortcuts etc.); WSH's
+            # SendKeys has no modifier tokens to undo that (verified), so a
+            # held Ctrl is not supported at all: the settings page does not
+            # offer Ctrl anywhere (dropdown or typed combinations) and the
+            # limitation is documented in README. Prefer F-key triggers.
             set_status("waiting for the trigger key...")
             # live typing only makes sense when typing into the focused window
             live_on = bool(CFG.get("live_mode", False)) and CFG.get(
@@ -215,7 +211,6 @@ def hotkey_loop():
             live_cmds = list(CFG.get("commands", [])) if live else []
             live_raw = [""]  # committed raw hypothesis text
             live_typed = [""]  # what was actually typed (shortcuts applied)
-            live_pasted = [False]  # paste channel noticed once: tell the page
 
             def live_on_chunk(chunk):
                 try:
@@ -225,18 +220,7 @@ def hotkey_loop():
                     live_raw[0] += d
                     out = _live_text(live_raw[0], live_cmds)
                     if len(out) > len(live_typed[0]):
-                        if live_paste():
-                            # the burst as clipboard text + Ctrl+V paste: "v"
-                            # arrives as Ctrl+V because Ctrl is really held
-                            set_clipboard(out[len(live_typed[0]):])
-                            send_keys("v")
-                            if not live_pasted[0]:
-                                # proves which build/path is running: the
-                                # settings page's live status names it once
-                                live_pasted[0] = True
-                                note("Ctrl held: live bursts pasted via clipboard + Ctrl+V")
-                        else:
-                            send_keys(out[len(live_typed[0]):])
+                        send_keys(out[len(live_typed[0]):])
                         live_typed[0] = out
                 except Exception as e:
                     log_error(f"live typing failed mid-speech: {e}")

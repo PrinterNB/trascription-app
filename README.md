@@ -13,7 +13,7 @@ transcription is typed into that window. Say a configured shortcut phrase like
 | Speech recognition | [faster-whisper](https://github.com/DeepInsider/faster-whisper) (OpenAI Whisper, CTranslate2, all CPU cores — plus NVIDIA Canary and NVIDIA Parakeet as alternative engines), with a CPU/GPU toggle in the tray menu |
 | Tray icon | `pystray` — the app lives in your system tray, no terminal window |
 | Screen-corner icon | while **listening** (recording) and while **transcribing**, a small icon appears in the top-right corner of your screens — red = recording, amber = transcribing — and disappears the rest of the time, so you can watch state even though Windows 11 hides tray icons |
-| Hold-to-talk | any F-key / Ctrl / Alt / Shift / letter / digit, configurable in the settings UI — or click "Detect my key" and physically press the shortcut you want (default `F9`) |
+| Hold-to-talk | any F-key / Alt / Shift / Win / letter / digit or a combination of them (no Ctrl - see Live typing), configurable in the settings UI — or click "Detect my key" and physically press the shortcut you want (default `F9`) |
 | Microphone | Windows DirectShow sources via `ffmpeg` (the real system mic list), with `sounddevice`/PortAudio as a fallback |
 | Output | types into the focused window (Windows Script Host `SendKeys` via `cscript.exe`) or copies to the clipboard — configurable |
 | Settings | web page served on `http://127.0.0.1:47111` — reachable **only from this machine** (no other LAN user can open it, so no password is needed), saved to `config.json` |
@@ -86,18 +86,21 @@ browser. It is served on `127.0.0.1`, so only this machine can view it
 (a running app picks the changes up immediately); when you are done, just close
 the tab — the page stays available for the whole time the app runs.
 
-- **Trigger key** — pick from the dropdown (F1–F12, Ctrl, Alt, Shift, Win, letter/digit),
+- **Trigger key** — pick from the dropdown (F1–F12, Alt, Shift, Win, letter/digit),
   or press **Detect my key** and then physically hold **any number of keys together**
-  for a moment (a single key, a combination like `Ctrl + F9`, or as many keys as you
+  for a moment (a single key, a combination like `Alt + F9`, or as many keys as you
   like): the exact keys you are holding are captured and used as your trigger
   combination. Prefer F-keys: holding a letter or digit also types repeated characters
   into your document.
-  You can also choose a **combination** (e.g. `Ctrl + F9` or `Win + Ctrl`) — pick one
+  You can also choose a **combination** (e.g. `Alt + F9` or `Win + Alt`) — pick one
   from the dropdown, or **type your own combination of any number of keys** in the
   "Or type your own combination" box (keys joined with `+`): the listener starts
   recording only when *all* parts are physically held at once, and stops when any
   one is released. Named keys are allowed by name: `Space`, `Tab`, `Enter`, `Esc`,
-  `Backspace`, `Minus`, `Comma`, `Period`, `Slash` (e.g. `Ctrl + Space`, `F9 + Space`).
+  `Backspace`, `Minus`, `Comma`, `Period`, `Slash` (e.g. `Alt + Space`, `F9 + Space`).
+  **Ctrl is not offered at all** (dropdown and typed combinations reject it) - see
+  the Live typing entry for why. Win-key triggers work through the physical-key
+  bit of `GetKeyboardState` (the `GetKeyState` down bit is never set for Win).
 - **Microphone** — choose which audio source the recorder uses. The dropdown lists
   every Windows microphone/input the OS exposes (through DirectShow — the same list
   the OS shows, headset mics included), plus any PortAudio input when present.
@@ -144,14 +147,16 @@ the tab — the page stays available for the whole time the app runs.
   with your speech, while **Canary / Parakeet / Custom models lag behind**
   and catch up the moment you release. Voice shortcuts ("say X → insert Y")
   are honored while typing live too. With clipboard output this setting has
-  no effect. The app checks the **physical** key state while typing live, not
-  the trigger string: if your hand is holding **Ctrl** at all (even with a
-  plain F-key trigger, or one saved as just `f2` while you press Ctrl+F2),
-  each live burst becomes clipboard text and a `v` is sent - with your Ctrl
-  really held that is **Ctrl+V**, which pastes it - so real words appear
-  instead of Ctrl+letter shortcuts (the clipboard is overwritten while you
-  dictate; the release-time flush types normally since the key is let go).
-  Holding **Alt/Shift** cannot be handled this way - prefer plain F-keys.
+  no effect. **Ctrl simply does not work with live typing, and is not offered
+  at all** (the dropdown and the typed-combination box both reject it): with
+  text being typed while your hand still holds the trigger, a physically
+  held Ctrl turns every character into a Ctrl+letter shortcut, and Windows
+  Script Host's SendKeys has no modifier up/down token to lift a held Ctrl
+  (verified: every `{CTRL UP}`-style spelling raises an error) - the
+  combination is not supported, so Ctrl was removed from the offer set
+  rather than shipping a broken option. Use F-keys or combinations without
+  Ctrl; Alt/Shift/Win triggers are selectable, but any held modifier
+  modifies live-typed text, so F-keys remain the safe choice.
 - **Voice shortcuts** — "say this → insert that" rows (e.g. `insert email` →
   your email): press "Add voice shortcut", type both sides in the boxes,
   "Remove" deletes a row.
