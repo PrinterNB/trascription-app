@@ -604,9 +604,11 @@ selectField(f, 'Output mode:', 'output_mode', D.outputs, null);
 st.live_mode = st.live_mode ? 'on' : 'off';
 selectField(f, 'Live typing (type while you speak):', 'live_mode', D.live_mode, null);
 var liveHelp = document.createElement('div'); liveHelp.className = 'note';
-liveHelp.textContent = ('Works with every engine but keeps pace only with fast ones: OpenAI Whisper (any size) '
-  + 'stays roughly in sync with speech; NVIDIA Canary / Parakeet / Custom models lag behind and catch up when you '
-  + 'release. Needs output mode "type into focused window" - with clipboard output this setting has no effect. '
+liveHelp.textContent = ('Works with every engine, but real-time pacing is only as good as the model: OpenAI Whisper '
+  + '(any size) stays close to your speech; NVIDIA Canary / Parakeet / Custom models trail more. It always '
+  + 're-listens only the last ~12 seconds of audio, so long dictations keep typing instead of stalling after the '
+  + 'first sentence, and anything not typed yet completes the moment you release. Needs output mode "type into '
+  + 'focused window" - with clipboard output this setting has no effect. '
   + 'Transcription runs on its own thread, so model time never delays your speech: words commit within '
   + 'fractions of a second of what you say. Voice shortcuts are respected while typing live too. '
   + 'Do not dictate with Ctrl or Win in your hand: a held Ctrl turns every typed character into a '

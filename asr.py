@@ -89,13 +89,19 @@ class LiveSession:
     picked up (and typed) on the next feed. A worker pass only starts once at
     least STEP seconds of NEW audio arrived, relaxed to PASS_SLACK of a
     slower model's speed so passes cannot stack and fall behind at a growing
-    rate. The FIRST hypothesis commits immediately (minus the word in flight)
-    so typing starts within about a second of speech; later growth only
-    extends text at least two consecutive hypotheses read the same way -
-    nothing typed live is ever retracted. Works with every engine; fast ones
-    keep pace with speech, big ones lag and catch up at the release-time
-    flush. If a hypothesis rewrites committed text, growth stalls and the
-    flush types the remainder (and says so).
+    rate. Passes only re-listen the last WINDOW_MAX seconds (sliding
+    window): per-pass cost stays bounded even for long dictations, and long
+    audio drifts out of re-reading - long-form decoders re-chunk big
+    windows and rewrite their own earlier text, which is what stalled the
+    old full-window agreement forever after the first sentence. The FIRST
+    hypothesis commits immediately (minus the word in flight) so typing
+    starts within about a second of speech; each pass APPENDS only what its
+    text adds past the longest word run it can match at the end of what is
+    already typed - at ANY offset in the pass, tolerating positions the pass
+    re-tokenized inside that run (drift must not stall growth) - always
+    holding SAFETY_WORDS trailing words back -
+    append-only by construction, nothing typed live is ever retracted. A
+    pass with zero overlap cannot be aligned and is skipped.
 
     feed(chunk) returns text newly safe to type ("" most calls);
     finish() stops the worker and flushes the rest;
@@ -103,7 +109,16 @@ class LiveSession:
 
     SR = 16000
     STEP = 0.5            # MINIMUM seconds of new audio between worker passes
-    WINDOW_MAX = 45.0     # re-transcribe at most this many seconds (cap cost)
+    WINDOW_MAX = 12.0     # SLIDING live window (WhisperLive-style): every
+                          # pass only re-listens the last WINDOW_MAX seconds.
+                          # Two things this fixes: per-pass cost stays bounded
+                          # even for long dictations (so the worker keeps pace
+                          # with speech on engines like Parakeet), and the
+                          # model re-reads ONLY recent audio - long-form
+                          # decoders re-chunk a 40s window and rewrite their
+                          # own earlier text, which stalls whole-text
+                          # agreement forever (first sentence typed, then
+                          # silence until release: the old symptom)
     SAFETY_WORDS = 1      # only the word in flight is held back
     PASS_SLACK = 0.8      # a model slower than STEP may start a pass on
                           # slightly LESS new audio: covering dt*0.8 < dt
@@ -115,7 +130,6 @@ class LiveSession:
         self.chunks = []
         self.head = 0      # frames dropped from the front of the window
         self.total = 0     # frames fed so far
-        self.prev = ""     # last hypothesis consumed
         self.committed = ""
         self.last_error = None
         self.lock = threading.Lock()
@@ -192,29 +206,66 @@ class LiveSession:
                 self.hyp = h
 
     def _consume(self, h, final=False):
-        if final:
-            if h.startswith(self.committed):
-                new = h[len(self.committed):]
-                self.committed = h
-                return new
-            # trimmed window or rewritten hypothesis: type what h adds past
-            # the words it shares with what is already committed
-            tail = self._tail_after_overlap(h)
-            if tail:
-                self.committed = (self.committed + " " + tail).strip()
-            return tail
-        # the first hypothesis commits its own head right away (minus the
-        # word in flight) so typing starts the moment speech starts; later
-        # growth needs agreement with the previous hypothesis, so nothing
-        # typed is ever retracted - only text two consecutive hypotheses
-        # read the same way extends the committed text
-        cand = self._safe_prefix(self.prev or h, h)
-        self.prev = h
-        if len(cand) <= len(self.committed) or not cand.startswith(self.committed):
-            return ""  # cannot untype: hold off until passes agree again
-        new = cand[len(self.committed):]
-        self.committed = cand
-        return new
+        """Append-only growth with word-level alignment (see the align block
+        below the docstring): the longest run at the END of what we typed is
+        located ANYWHERE inside this hypothesis - it need not sit at h's
+        start, because long-form decoders re-read (differently!) their own
+        earlier text on longer windows, and that drift must not stall growth.
+        Everything h has AFTER that run is text over recent audio = new, so
+        it is appended (minus SAFETY_WORDS trailing words while live).
+        A pass whose end matches nothing typed is skipped (the flush has a
+        full-text startswith fallback). Append-only by construction:
+        nothing typed live is ever retracted."""
+        # align: longest word run at the END of what we typed that appears
+        # (up to the drift tolerance below) ANYWHERE inside this hypothesis -
+        # the run may sit after this pass's re-read of older audio, because
+        # long-form decoders re-tokenize their own earlier text on a longer
+        # window and that must not stall growth. Everything h has after that
+        # run is text over recent audio = new; append-only, so nothing typed
+        # is ever retracted.
+        cw = self.committed.split()
+        hw = h.split()
+        # match the longest run at the END of typed text inside h, at ANY
+        # offset, tolerating up to a third of the run's positions being
+        # re-tokenized (long-form decoders re-read some of their own older
+        # text on longer windows - that drift must not break the alignment,
+        # but >=2/3 of the same words at one place is strong evidence this
+        # pass is looking at the same audio we already typed).
+        m_best, o_best, mism_best = 0, 0, 0
+        for m in range(min(len(cw), len(hw)), 0, -1):
+            tol = m // 3 if m >= 3 else 0
+            tail = cw[len(cw) - m:]
+            best_o, best_mism = None, m
+            for o in range(0, len(hw) - m + 1):
+                mism = 0
+                for a, b in zip(tail, hw[o:o + m]):
+                    if a != b:
+                        mism += 1
+                        if mism > tol:
+                            break
+                if mism <= tol and mism < best_mism:
+                    best_o, best_mism = o, mism
+            if best_o is not None:
+                m_best, o_best, mism_best = m, best_o, best_mism
+                break
+        if final and not m_best and h.startswith(self.committed):
+            # full-text hypothesis (the window covered everything): plain tail
+            new = h[len(self.committed):]
+            self.committed = h
+            return new
+        if self.committed and not m_best:
+            return ""  # cannot align this pass with what was typed at all
+        words = hw[o_best + m_best:]
+        if not final:
+            if len(words) <= self.SAFETY_WORDS:
+                return ""
+            words = words[:-self.SAFETY_WORDS]
+        if not words:
+            return ""
+        new = " ".join(words)
+        out = ((" " if self.committed else "") + new)
+        self.committed = (self.committed + " " + new).strip()
+        return out
 
     def _window(self):
         if not self.chunks:
@@ -230,30 +281,5 @@ class LiveSession:
         while len(self.chunks) > 1 and len(self.chunks[0]) <= self.head:
             self.head -= len(self.chunks.pop(0))
         return cat
-
-    def _safe_prefix(self, prev, h):
-        """Longest word-aligned prefix prev and h agree on, minus SAFETY_WORDS."""
-        n = min(len(prev), len(h))
-        i = 0
-        while i < n and prev[i] == h[i]:
-            i += 1
-        lcp = h[:i]
-        sp = lcp.rfind(" ")
-        if sp < 0:
-            return ""
-        words = lcp[:sp].split()
-        if len(words) <= self.SAFETY_WORDS:
-            return ""
-        return " ".join(words[:-self.SAFETY_WORDS])
-
-    def _tail_after_overlap(self, h):
-        """Words of h past whatever h and the committed text end/start sharing
-        (a trimmed window repeats a few of the last words as context)."""
-        cw = self.committed.split()
-        hw = h.split()
-        for t in range(min(len(cw), len(hw)), -1, -1):
-            if cw[len(cw) - t:] == hw[:t]:
-                return " ".join(hw[t:]).strip()
-        return ""
 
 
