@@ -569,7 +569,10 @@ var liveHelp = document.createElement('div'); liveHelp.className = 'note';
 liveHelp.textContent = ('Works with every engine but keeps pace only with fast ones: OpenAI Whisper (any size) '
   + 'stays roughly in sync with speech; NVIDIA Canary / Parakeet / Custom models lag behind and catch up when you '
   + 'release. Needs output mode "type into focused window" - with clipboard output this setting has no effect. '
-  + 'Voice shortcuts are respected while typing live too.');
+  + 'Voice shortcuts are respected while typing live too. If your trigger holds Ctrl, each live burst is put '
+  + 'on the clipboard and pasted with Ctrl+V (your physically-held Ctrl makes a typed v into Ctrl+V), so text '
+  + 'comes out as words, not Ctrl+letter shortcuts - this does overwrite your clipboard while you speak. '
+  + 'Triggers holding Alt, Shift or Win cannot be handled this way - prefer an F-key with live typing.');
 f.appendChild(liveHelp);
 selectField(f, 'Transcription engine:', 'engine', D.engines, fillModel);
 modelBlock = document.createElement('div'); f.appendChild(modelBlock); fillModel();

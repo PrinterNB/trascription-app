@@ -178,10 +178,9 @@ def set_clipboard(text):
 def send_keys(text):
     vbs = os.path.join(os.path.dirname(config_mod.CONFIG_PATH), "sendkeys.vbs")
     for chunk in _chunks(text, 3000):
-        r = subprocess.run(
-            ["cscript.exe", "//nologo", vbs, chunk], capture_output=True, text=True,
-            creationflags=NO_CONSOLE,
-        )
+        r = subprocess.run(["cscript.exe", "//nologo", vbs, chunk],
+                           capture_output=True, text=True,
+                           creationflags=NO_CONSOLE)
         if r.returncode != 0:
             raise OSError((r.stderr or r.stdout or "sendkeys failed").strip())
 
@@ -193,6 +192,15 @@ def hotkey_loop():
                 time.sleep(0.3)
                 continue
             key = CFG.get("trigger_key", "f9")
+            # live typing sends text WHILE the trigger is physically held: a
+            # Ctrl part would make every typed character a Ctrl+letter shortcut.
+            # WSH's SendKeys has no modifier up/down token at all (verified:
+            # {CTRL UP} etc. all raise), so instead each live burst goes
+            # through the clipboard and is pasted by sending "v" - with the
+            # user's Ctrl really still held that IS Ctrl+V (paste) in normal
+            # Windows apps. Alt/Shift/Win triggers cannot be handled this way.
+            trig = {p.strip().lower() for p in str(key).split("+") if p.strip()}
+            live_paste = "ctrl" in trig and "alt" not in trig and "shift" not in trig
             set_status("waiting for the trigger key...")
             # live typing only makes sense when typing into the focused window
             live_on = bool(CFG.get("live_mode", False)) and CFG.get(
@@ -213,7 +221,13 @@ def hotkey_loop():
                     live_raw[0] += d
                     out = _live_text(live_raw[0], live_cmds)
                     if len(out) > len(live_typed[0]):
-                        send_keys(out[len(live_typed[0]):])
+                        if live_paste:
+                            # the burst as clipboard text + Ctrl+V paste: "v"
+                            # arrives as Ctrl+V because Ctrl is physically held
+                            set_clipboard(out[len(live_typed[0]):])
+                            send_keys("v")
+                        else:
+                            send_keys(out[len(live_typed[0]):])
                         live_typed[0] = out
                 except Exception as e:
                     log_error(f"live typing failed mid-speech: {e}")

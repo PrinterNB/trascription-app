@@ -142,7 +142,13 @@ the tab — the page stays available for the whole time the app runs.
   with your speech, while **Canary / Parakeet / Custom models lag behind**
   and catch up the moment you release. Voice shortcuts ("say X → insert Y")
   are honored while typing live too. With clipboard output this setting has
-  no effect.
+  no effect. If your trigger combination holds **Ctrl**, live typing sends each
+  burst through the clipboard instead of typing it: the burst becomes clipboard
+  text and a `v` is sent - with your Ctrl still physically held that is
+  **Ctrl+V**, which pastes it - so real words appear instead of Ctrl+letter
+  shortcuts (the clipboard is overwritten while you dictate; the final flush at
+  release types normally). Triggers holding **Alt/Shift/Win** cannot be handled
+  this way - prefer an F-key or Ctrl+F-key with live typing.
 - **Voice shortcuts** — "say this → insert that" rows (e.g. `insert email` →
   your email): press "Add voice shortcut", type both sides in the boxes,
   "Remove" deletes a row.
