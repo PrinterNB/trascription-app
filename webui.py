@@ -45,13 +45,21 @@ for _c in range(ord("a"), ord("z") + 1):
 for _d in range(10):
     KEY_VK[str(_d)] = ord(str(_d))
 
-# Ctrl is deliberately NOT offered anywhere (dropdown or typed combinations):
-# with live typing a physically held Ctrl turns every typed character into a
-# Ctrl+letter shortcut, and WSH SendKeys has no modifier up/down token to
-# lift it (verified: every {CTRL UP}-style spelling raises). The limitation
-# is documented in README; keeping Ctrl out of the offer set is the honest
-# way to keep the trigger simple and correct.
-_MODS = ["alt", "shift", "win"]
+# Ctrl and Win are deliberately NOT offered anywhere (dropdown or typed
+# combinations):
+# - Ctrl: with live typing a physically held Ctrl turns every typed
+#   character into a Ctrl+letter shortcut, and WSH SendKeys has no
+#   modifier up/down token to lift it (verified: every {CTRL UP}-style
+#   spelling raises).
+# - Win: Windows never reports a physically held Win key to the Win32
+#   keyboard APIs at all - GetKeyState(0xDB)'s down bit AND the
+#   GetKeyboardState physical bit both stay 0 while it is pressed
+#   (measured on this machine), so a Win part of a trigger combination
+#   could never be detected, no matter how the app is written.
+# Both limitations are documented in README; keeping them out of the offer
+# set is the honest way to keep every offered trigger reliable.
+_MODS = ["alt", "shift"]
+_NOT_OFFERED = ("ctrl", "win", "lwin", "rwin")
 _NAMED = list(NAMED_KEYS)
 
 SINGLE_KEYS = [f"f{i}" for i in range(1, 13)] + _MODS + _NAMED
@@ -333,9 +341,10 @@ def _valid_trigger(name):
     if not isinstance(name, str) or not name:
         return False
     parts = [p.strip() for p in name.split("+") if p.strip()]
-    # Ctrl is not offered (see _MODS comment/README): legacy configs that
-    # saved a Ctrl combination reset to the default instead
-    return bool(parts) and all(p in KEY_VK and p != "ctrl" for p in parts)
+    # Ctrl/Win are not offered (see _MODS comment/README): legacy configs
+    # that saved one of them reset to the default instead
+    return bool(parts) and all(p in KEY_VK and p not in _NOT_OFFERED
+                               for p in parts)
 
 
 def _mic_options():
@@ -558,8 +567,8 @@ function normCombo(v) {
   for (var ti = 0; ti < toks.length; ti++) {
     var p = toks[ti].trim();
     if (!p) continue;
-    if (p === 'ctrl' || p === 'control') {
-      setMsg('Ctrl is not offered: a physically held Ctrl cannot be lifted while typing (WSH has no modifier tokens) - use F-keys or combinations without Ctrl.');
+    if (p === 'ctrl' || p === 'control' || p === 'win' || p === 'lwin' || p === 'rwin' || p === 'windows') {
+      setMsg('Ctrl and Win are not offered: a held Ctrl cannot be lifted while typing, and Windows never reports a held Win key at all - use F-keys, Alt or Shift combinations.');
       return null;
     }
     if (!_validKey[p]) {
@@ -600,10 +609,10 @@ liveHelp.textContent = ('Works with every engine but keeps pace only with fast o
   + 'release. Needs output mode "type into focused window" - with clipboard output this setting has no effect. '
   + 'Transcription runs on its own thread, so model time never delays your speech: words commit within '
   + 'fractions of a second of what you say. Voice shortcuts are respected while typing live too. '
-  + 'Do not dictate with Ctrl in your hand: a physically held Ctrl turns every typed character into a '
-  + 'Ctrl+letter shortcut and nothing can lift it (WSH has no modifier tokens) - so Ctrl is not offered '
-  + 'as a trigger anywhere on this page, typed combinations included. Prefer F-keys and combinations '
-  + 'without Ctrl.');
+  + 'Do not dictate with Ctrl or Win in your hand: a held Ctrl turns every typed character into a '
+  + 'Ctrl+letter shortcut and WSH cannot lift it, and Windows never reports a held Win key to any '
+  + 'API - so neither is offered as a trigger here, typed combinations included. F-keys, Alt and '
+  + 'Shift combinations trigger and type reliably.');
 f.appendChild(liveHelp);
 selectField(f, 'Transcription engine:', 'engine', D.engines, fillModel);
 modelBlock = document.createElement('div'); f.appendChild(modelBlock); fillModel();

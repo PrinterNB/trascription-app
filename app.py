@@ -30,6 +30,11 @@ if sys.stderr is None:
 KEY_VK = webui.KEY_VK
 
 CFG = config_mod.load()
+# an old config can name keys we no longer offer (Ctrl/Win): a trigger with
+# an un-detectable part would silently never fire, so fall back the same way
+# the settings page does (the page's Save fixes the file on the next save)
+if not webui._valid_trigger(CFG.get("trigger_key", "f9")):
+    CFG["trigger_key"] = "f9"
 STATUS = {"status": "idle", "paused": False}
 ICON = None
 # Helpers (ffmpeg, powershell, cscript) must never open a console window: it
@@ -43,11 +48,26 @@ def log_error(msg):
         f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
 
 
+def _app_build():
+    """Which code build is running: the modification time of this very file.
+    Shown in the settings page's live status so a stale (restarted-but-old)
+    process can be told apart from the current code at a glance."""
+    try:
+        return time.strftime("%Y-%m-%d %H:%M",
+                             time.localtime(os.path.getmtime(os.path.abspath(__file__))))
+    except OSError:
+        return "unknown"
+
+
+APP_BUILD = _app_build()
+
+
 def key_down(name):
-    # A trigger may be a single key ("f9") or a combination ("f9+alt", "win+alt"):
-    # all parts must be physically held at once. key_is_down also reads the
-    # GetKeyboardState physical bit, which is what makes Win-key triggers work
-    # (GetKeyState's down bit is undefined/never set for Win).
+    # A trigger may be a single key ("f9") or a combination ("f9+alt",
+    # "shift+alt"): all parts must be physically held at once. key_is_down
+    # honors the GetKeyboardState physical bit too, because GetKeyState's
+    # down bit is undefined outside Shift/Ctrl/Alt. (Win is not offered at
+    # all: its held state is not reported by Windows at all - README.)
     parts = [p for p in str(name).split("+") if p.strip()]
     if not parts:
         parts = ["f9"]
@@ -200,7 +220,7 @@ def hotkey_loop():
             # held Ctrl is not supported at all: the settings page does not
             # offer Ctrl anywhere (dropdown or typed combinations) and the
             # limitation is documented in README. Prefer F-key triggers.
-            set_status("waiting for the trigger key...")
+            set_status(f"waiting for the trigger key... (app build {APP_BUILD})")
             # live typing only makes sense when typing into the focused window
             live_on = bool(CFG.get("live_mode", False)) and CFG.get(
                 "output_mode", "autotype") != "clipboard"
