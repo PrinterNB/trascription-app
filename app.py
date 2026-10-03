@@ -215,6 +215,7 @@ def hotkey_loop():
             live_cmds = list(CFG.get("commands", [])) if live else []
             live_raw = [""]  # committed raw hypothesis text
             live_typed = [""]  # what was actually typed (shortcuts applied)
+            live_pasted = [False]  # paste channel noticed once: tell the page
 
             def live_on_chunk(chunk):
                 try:
@@ -229,6 +230,11 @@ def hotkey_loop():
                             # arrives as Ctrl+V because Ctrl is really held
                             set_clipboard(out[len(live_typed[0]):])
                             send_keys("v")
+                            if not live_pasted[0]:
+                                # proves which build/path is running: the
+                                # settings page's live status names it once
+                                live_pasted[0] = True
+                                note("Ctrl held: live bursts pasted via clipboard + Ctrl+V")
                         else:
                             send_keys(out[len(live_typed[0]):])
                         live_typed[0] = out
