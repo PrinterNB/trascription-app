@@ -1,4 +1,6 @@
 import os
+import threading
+import time
 
 import config as config_mod
 
@@ -79,63 +81,117 @@ def _run_hf(pipe, audio):
 
 class LiveSession:
     """Progressive live typing for engines without a native streaming API (none
-    of the ones here have one). While the user speaks, feed() re-transcribes
-    the growing audio every STEP seconds; the FIRST hypothesis commits
-    immediately (minus the one word in flight), so typing starts within about
-    half a second of speech, and later growth only extends text at least two
-    consecutive hypotheses read the same way - nothing typed is ever
-    retracted. Works with every engine: fast models (Whisper) keep pace with
-    speech, big ones lag behind and catch up when finish() runs at release.
-    If a hypothesis rewrites already-committed text, growth stalls and the
-    final flush types the remainder (and says so).
+    of the ones here have one). Transcription runs in a WORKER THREAD that
+    constantly re-transcribes the LATEST window as fast as the model can run
+    it: feed() never blocks, so capture and the user's speech are never
+    delayed by model time - the wall-time pass interval simply becomes the
+    model's speed, the shortest thing any engine can offer. Hypotheses are
+    picked up (and typed) on the next feed. A worker pass only starts once at
+    least STEP seconds of NEW audio arrived, relaxed to PASS_SLACK of a
+    slower model's speed so passes cannot stack and fall behind at a growing
+    rate. The FIRST hypothesis commits immediately (minus the word in flight)
+    so typing starts within about a second of speech; later growth only
+    extends text at least two consecutive hypotheses read the same way -
+    nothing typed live is ever retracted. Works with every engine; fast ones
+    keep pace with speech, big ones lag and catch up at the release-time
+    flush. If a hypothesis rewrites committed text, growth stalls and the
+    flush types the remainder (and says so).
 
     feed(chunk) returns text newly safe to type ("" most calls);
-    finish() flushes the rest."""
+    finish() stops the worker and flushes the rest;
+    stop() just ends the worker (aborted cycles)."""
 
     SR = 16000
-    STEP = 0.5            # seconds of new speech between hypothesis passes:
-                          # a word needs two consecutive passes to agree on it,
-                          # so the typing lag is roughly this - half a second
-                          # keeps it near real time even though passes cost a
-                          # model run (fast models still fall behind; that is
-                          # the engine, not this interval)
+    STEP = 0.5            # MINIMUM seconds of new audio between worker passes
     WINDOW_MAX = 45.0     # re-transcribe at most this many seconds (cap cost)
     SAFETY_WORDS = 1      # only the word in flight is held back
+    PASS_SLACK = 0.8      # a model slower than STEP may start a pass on
+                          # slightly LESS new audio: covering dt*0.8 < dt
+                          # seconds per dt seconds keeps up with real-time
+                          # speech instead of drifting behind it
 
     def __init__(self, cfg):
         self.cfg = cfg
         self.chunks = []
         self.head = 0      # frames dropped from the front of the window
         self.total = 0     # frames fed so far
-        self.pend = 0.0    # frames fed since the last pass
-        self.prev = ""     # last hypothesis
+        self.prev = ""     # last hypothesis consumed
         self.committed = ""
         self.last_error = None
+        self.lock = threading.Lock()
+        self.hyp = None    # latest unconsumed hypothesis from the worker
+        self.stop_flag = threading.Event()
+        self.worker = threading.Thread(target=self._worker, name="live-asr",
+                                      daemon=True)  # never holds the process
+        # (a leaked session - e.g. recorder crashed before its stop - must
+        # not keep the app or a test alive; stop()/finish() join it normally)
+        self.worker.start()
+
+    def stop(self):
+        # for cycles that never reach finish() (key never pressed etc.)
+        self.stop_flag.set()
+        try:
+            self.worker.join(timeout=10)
+        except Exception:
+            pass
 
     def feed(self, audio):
         if audio is None or len(audio) == 0:
             return ""
-        self.chunks.append(numpy.asarray(audio, dtype=numpy.float32))
-        self.total += len(audio)
-        self.pend += len(audio)
-        if self.pend < self.STEP * self.SR:
+        with self.lock:
+            self.chunks.append(numpy.asarray(audio, dtype=numpy.float32))
+            self.total += len(audio)
+        with self.lock:
+            h, self.hyp = self.hyp, None
+        if h is None:
             return ""
-        return self._pass()
+        return self._consume(h)
 
     def finish(self):
-        return self._pass(final=True)
-
-    def _pass(self, final=False):
-        self.pend = 0.0
+        self.stop_flag.set()
+        try:
+            self.worker.join(timeout=10)  # let a pass in flight finish first
+        except Exception:
+            pass
         window = self._window()
         if window.size == 0:
             return ""
         try:
             h = transcribe(window, self.cfg).strip()
         except Exception as e:
-            self.last_error = str(e)  # the FIRST pass is where a bad engine
-            return ""                # config fails here, not at startup: keep
-                                     # it for the caller so the user gets told
+            self.last_error = str(e)
+            return ""
+        return self._consume(h, final=True)
+
+    def _worker(self):
+        # feed() never blocks, so new audio arrives at real speech speed:
+        # a pass starting after 'need' new frames makes wall interval
+        # ~= model run time - as tight as the engine allows
+        last_total = 0
+        dt = 0.0
+        while not self.stop_flag.is_set():
+            with self.lock:
+                total = self.total
+            need = max(self.STEP, dt * self.PASS_SLACK) * self.SR
+            if total - last_total < need:
+                self.stop_flag.wait(0.05)  # sleeps, but notices stop
+                continue
+            last_total = total
+            try:
+                with self.lock:
+                    window = self._window()
+                if window.size == 0:
+                    continue
+                t0 = time.perf_counter()
+                h = transcribe(window, self.cfg).strip()
+                dt = time.perf_counter() - t0
+            except Exception as e:
+                self.last_error = str(e)
+                continue
+            with self.lock:
+                self.hyp = h
+
+    def _consume(self, h, final=False):
         if final:
             if h.startswith(self.committed):
                 new = h[len(self.committed):]
@@ -147,11 +203,11 @@ class LiveSession:
             if tail:
                 self.committed = (self.committed + " " + tail).strip()
             return tail
-        # the first pass commits its own head right away (minus the word in
-        # flight) so typing starts the moment speech starts; later growth still
-        # needs agreement with the previous hypothesis, so nothing typed is
-        # ever retracted - only words at least two consecutive passes read the
-        # same way extend the committed text
+        # the first hypothesis commits its own head right away (minus the
+        # word in flight) so typing starts the moment speech starts; later
+        # growth needs agreement with the previous hypothesis, so nothing
+        # typed is ever retracted - only text two consecutive hypotheses
+        # read the same way extends the committed text
         cand = self._safe_prefix(self.prev or h, h)
         self.prev = h
         if len(cand) <= len(self.committed) or not cand.startswith(self.committed):

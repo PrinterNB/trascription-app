@@ -235,13 +235,24 @@ def hotkey_loop():
                 except Exception as e:
                     log_error(f"live typing failed mid-speech: {e}")
 
-            audio, duration, held = recorder.record_key_held(
-                lambda: key_down(key), device=mic_device(),
-                on_start=lambda: set_status("recording"),
-                on_chunk=live_on_chunk if live else None,
-                idle_wait=2.0,  # short so the loop re-reads CFG: a trigger key
-                # changed on the settings page applies within a few seconds
-            )
+            try:
+                audio, duration, held = recorder.record_key_held(
+                    lambda: key_down(key), device=mic_device(),
+                    on_start=lambda: set_status("recording"),
+                    on_chunk=live_on_chunk if live else None,
+                    idle_wait=2.0,  # short so the loop re-reads CFG: a trigger key
+                    # changed on the settings page applies within a few seconds
+                )
+            except Exception:
+                # the live worker is running: end it before the outer handler
+                # moves on, else it would spin for the whole app run
+                if live:
+                    live.stop()
+                raise
+            if live and (not held or len(audio) == 0 or duration < 0.5
+                         or recorder.peak(audio) < 0.002):
+                # cycle aborted before the flush: end the worker thread
+                live.stop()
             if not held:
                 # key never pressed (idle timeout): normal, not an error
                 set_status("idle")
