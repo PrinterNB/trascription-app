@@ -82,7 +82,7 @@ class LiveSession:
     of the ones here have one). While the user speaks, feed() re-transcribes
     the growing audio every STEP seconds; the FIRST hypothesis commits
     immediately (minus the one word in flight), so typing starts within about
-    a second of speech, and later growth only extends text at least two
+    half a second of speech, and later growth only extends text at least two
     consecutive hypotheses read the same way - nothing typed is ever
     retracted. Works with every engine: fast models (Whisper) keep pace with
     speech, big ones lag behind and catch up when finish() runs at release.
@@ -93,7 +93,12 @@ class LiveSession:
     finish() flushes the rest."""
 
     SR = 16000
-    STEP = 1.0            # seconds of new speech between hypothesis passes
+    STEP = 0.5            # seconds of new speech between hypothesis passes:
+                          # a word needs two consecutive passes to agree on it,
+                          # so the typing lag is roughly this - half a second
+                          # keeps it near real time even though passes cost a
+                          # model run (fast models still fall behind; that is
+                          # the engine, not this interval)
     WINDOW_MAX = 45.0     # re-transcribe at most this many seconds (cap cost)
     SAFETY_WORDS = 1      # only the word in flight is held back
 

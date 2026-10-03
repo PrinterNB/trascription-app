@@ -132,8 +132,9 @@ the tab — the page stays available for the whole time the app runs.
 - **Live typing (type while you speak)** — off by default. With output mode
   "type into the focused window" and this ON, recognized words are typed into
   the window **while you are still talking**: the recorder keeps feeding the
-  growing audio to the model every second, and the first words you say commit
-  right away (about a second after speech starts) - later words are typed
+  growing audio to the model every half second, and the first words you say
+  commit right away (about half a second after speech starts) - later words are
+  typed
   once the model is steady on them, and the word you are still saying is
   always held back, so nothing typed live is ever retracted (none of these
   models has a native streaming API, so this re-confirmation is what makes it
@@ -142,13 +143,14 @@ the tab — the page stays available for the whole time the app runs.
   with your speech, while **Canary / Parakeet / Custom models lag behind**
   and catch up the moment you release. Voice shortcuts ("say X → insert Y")
   are honored while typing live too. With clipboard output this setting has
-  no effect. If your trigger combination holds **Ctrl**, live typing sends each
-  burst through the clipboard instead of typing it: the burst becomes clipboard
-  text and a `v` is sent - with your Ctrl still physically held that is
-  **Ctrl+V**, which pastes it - so real words appear instead of Ctrl+letter
-  shortcuts (the clipboard is overwritten while you dictate; the final flush at
-  release types normally). Triggers holding **Alt/Shift/Win** cannot be handled
-  this way - prefer an F-key or Ctrl+F-key with live typing.
+  no effect. The app checks the **physical** key state while typing live, not
+  the trigger string: if your hand is holding **Ctrl** at all (even with a
+  plain F-key trigger, or one saved as just `f2` while you press Ctrl+F2),
+  each live burst becomes clipboard text and a `v` is sent - with your Ctrl
+  really held that is **Ctrl+V**, which pastes it - so real words appear
+  instead of Ctrl+letter shortcuts (the clipboard is overwritten while you
+  dictate; the release-time flush types normally since the key is let go).
+  Holding **Alt/Shift** cannot be handled this way - prefer plain F-keys.
 - **Voice shortcuts** — "say this → insert that" rows (e.g. `insert email` →
   your email): press "Add voice shortcut", type both sides in the boxes,
   "Remove" deletes a row.

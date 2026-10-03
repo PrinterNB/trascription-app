@@ -192,15 +192,18 @@ def hotkey_loop():
                 time.sleep(0.3)
                 continue
             key = CFG.get("trigger_key", "f9")
-            # live typing sends text WHILE the trigger is physically held: a
-            # Ctrl part would make every typed character a Ctrl+letter shortcut.
+            # live typing sends text WHILE the user's hand is on the trigger,
+            # and they may be physically holding Ctrl even when the trigger
+            # string does not list it (trigger "f2" while pressing Ctrl+F2).
             # WSH's SendKeys has no modifier up/down token at all (verified:
-            # {CTRL UP} etc. all raise), so instead each live burst goes
-            # through the clipboard and is pasted by sending "v" - with the
-            # user's Ctrl really still held that IS Ctrl+V (paste) in normal
-            # Windows apps. Alt/Shift/Win triggers cannot be handled this way.
-            trig = {p.strip().lower() for p in str(key).split("+") if p.strip()}
-            live_paste = "ctrl" in trig and "alt" not in trig and "shift" not in trig
+            # {CTRL UP} etc. all raise), so when the REAL Ctrl is down
+            # (key_down reads physical GetKeyState) and no Alt/Shift to
+            # complicate it, each live burst goes through the clipboard and
+            # is pasted by sending "v" - the held Ctrl makes that Ctrl+V.
+            # Checked per burst: key state can change mid-utterance.
+            def live_paste():
+                return key_down("ctrl") and not key_down("alt") \
+                    and not key_down("shift")
             set_status("waiting for the trigger key...")
             # live typing only makes sense when typing into the focused window
             live_on = bool(CFG.get("live_mode", False)) and CFG.get(
@@ -221,9 +224,9 @@ def hotkey_loop():
                     live_raw[0] += d
                     out = _live_text(live_raw[0], live_cmds)
                     if len(out) > len(live_typed[0]):
-                        if live_paste:
+                        if live_paste():
                             # the burst as clipboard text + Ctrl+V paste: "v"
-                            # arrives as Ctrl+V because Ctrl is physically held
+                            # arrives as Ctrl+V because Ctrl is really held
                             set_clipboard(out[len(live_typed[0]):])
                             send_keys("v")
                         else:
